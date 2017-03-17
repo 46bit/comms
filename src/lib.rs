@@ -23,6 +23,22 @@ pub enum ClientTimeout {
     DisconnectAfter(Duration),
 }
 
+impl ClientTimeout {
+    pub fn keep_alive_after(maybe_duration: Option<Duration>) -> ClientTimeout {
+        match maybe_duration {
+            Some(duration) => ClientTimeout::KeepAliveAfter(duration),
+            None => ClientTimeout::None,
+        }
+    }
+
+    pub fn disconnect_after(maybe_duration: Option<Duration>) -> ClientTimeout {
+        match maybe_duration {
+            Some(duration) => ClientTimeout::DisconnectAfter(duration),
+            None => ClientTimeout::None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClientStatus {
     Ready,
