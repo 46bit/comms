@@ -38,8 +38,26 @@ impl<T, R> Room<T, R>
         true
     }
 
+    pub fn remove(&mut self, id: &ClientId) -> Option<Client<T, R>> {
+        self.clients.remove(id)
+    }
+
     pub fn contains(&self, id: &ClientId) -> bool {
         self.clients.contains_key(id)
+    }
+
+    pub fn name_of(&self, id: &ClientId) -> Option<String> {
+        self.clients.get(id).and_then(|c| c.name())
+    }
+
+    // *Copies* filtered clients into another Room.
+    pub fn filter<F>(&self, mut f: F) -> Room<T, R>
+        where F: FnMut(&Client<T, R>) -> bool,
+              T: Clone,
+              R: Clone
+    {
+        let filtered_client_clones = self.clients.values().filter(|c| f(c)).cloned().collect();
+        Room::new(filtered_client_clones)
     }
 
     fn client_mut(&mut self, id: &ClientId) -> Option<&mut Client<T, R>> {

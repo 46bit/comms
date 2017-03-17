@@ -192,7 +192,7 @@ mod tests {
             match rx_stream.next().unwrap().unwrap() {
                 Command::ReceiveInto(client_id, ClientTimeout::None, msg_forward_tx) => {
                     assert_eq!(client_id, client.id());
-                    msg_forward_tx.complete(msg.clone());
+                    msg_forward_tx.send(msg.clone()).unwrap();
                 }
                 _ => assert!(false),
             }
@@ -227,7 +227,7 @@ mod tests {
             match rx_stream.next().unwrap().unwrap() {
                 Command::ReceiveInto(client_id, ClientTimeout::None, msg_forward_tx) => {
                     assert_eq!(client_id, client.id);
-                    msg_forward_tx.complete(msg.clone());
+                    msg_forward_tx.send(msg.clone()).unwrap();
                 }
                 _ => assert!(false),
             }
@@ -259,7 +259,7 @@ mod tests {
             match rx_stream.next().unwrap().unwrap() {
                 Command::StatusInto(client_id, status_reply_tx) => {
                     assert_eq!(client_id, client.id());
-                    status_reply_tx.complete(ClientStatus::Ready);
+                    status_reply_tx.send(ClientStatus::Ready).unwrap();
                 }
                 _ => assert!(false),
             }
