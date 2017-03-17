@@ -28,6 +28,10 @@ impl<T, R> Room<T, R>
         self.clients.values().map(|c| c.name()).collect()
     }
 
+    pub fn into_clients(self) -> Vec<Client<T, R>> {
+        self.clients.into_iter().map(|(_, c)| c).collect()
+    }
+
     // @TODO: Exists only for `Client::join`. When RFC1422 is stable, make this `pub(super)`.
     #[doc(hidden)]
     pub fn insert(&mut self, client: Client<T, R>) -> bool {
