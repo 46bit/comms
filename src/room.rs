@@ -1,7 +1,7 @@
-use futures::{Future, BoxFuture};
-use futures::future::{join_all, JoinAll};
 use super::*;
 use std::collections::HashMap;
+use futures::{Future, BoxFuture};
+use futures::future::{join_all, JoinAll};
 
 #[derive(Clone)]
 pub struct Room<T, R>

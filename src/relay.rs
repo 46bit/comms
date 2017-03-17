@@ -5,7 +5,7 @@ use futures::sync::{mpsc, oneshot};
 use super::*;
 
 #[derive(Debug)]
-enum RelayError<A, B> {
+pub enum RelayError<A, B> {
     IncorrectClientIdInCommand,
     BrokenPipe(String),
     QueueLimitExceeded(String),
@@ -13,7 +13,7 @@ enum RelayError<A, B> {
     Rx(B),
 }
 
-struct ClientRelay<A, B, T, R>
+pub struct ClientRelay<A, B, T, R>
     where A: Sink<SinkItem = T> + 'static,
           B: Stream<Item = R> + 'static,
           A::SinkError: Debug,
@@ -260,20 +260,18 @@ impl<B, R> ClientRelayRx<B, R>
 
         // Try to forward received messages from the client.
         while !self.buffer.is_empty() && !self.forward_txs.is_empty() {
-            let mut forward_tx = self.forward_txs.pop_front().unwrap();
-            // This is how `oneshot::Sender` indicates the `Receiver` has not been dropped.
-            if forward_tx.poll_cancel() == Ok(Async::NotReady) {
-                let msg = self.buffer.pop_front().unwrap();
-                forward_tx.complete(msg);
+            let forward_tx = self.forward_txs.pop_front().unwrap();
+            let msg = self.buffer.pop_front().unwrap();
+            if let Err(msg) = forward_tx.send(msg) {
+                self.buffer.push_front(msg);
             }
         }
 
         while !self.status_txs.is_empty() {
-            let mut status_tx = self.status_txs.pop_front().unwrap();
-            // This is how `oneshot::Sender` indicates the `Receiver` has not been dropped.
-            if status_tx.poll_cancel() == Ok(Async::NotReady) {
-                status_tx.complete(ClientStatus::Ready);
-            }
+            let status_tx = self.status_txs.pop_front().unwrap();
+            // N.B., it's fine if this send fails - it means the oneshot got dropped, and
+            // we're fine to discard the sent ClientStatus.
+            let _ = status_tx.send(ClientStatus::Ready);
         }
 
         Ok(Async::NotReady)

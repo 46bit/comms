@@ -1,3 +1,6 @@
+extern crate futures;
+extern crate uuid;
+
 mod client;
 mod room;
 mod relay;
@@ -62,9 +65,9 @@ pub trait Communicator {
 #[cfg(test)]
 mod test {
     use super::*;
-    use futures::sync::mpsc;
-    use futures::executor;
     use std::sync::Arc;
+    use futures::executor;
+    use futures::sync::mpsc;
 
     #[derive(Clone, PartialEq, Debug)]
     pub enum TinyMsg {

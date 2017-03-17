@@ -1,5 +1,5 @@
-use futures::{Sink, Future, BoxFuture, future};
 use super::*;
+use futures::{Sink, Future, BoxFuture, future};
 use futures::sync::{mpsc, oneshot};
 
 #[derive(Clone)]
