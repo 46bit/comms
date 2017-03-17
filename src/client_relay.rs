@@ -4,25 +4,15 @@ use futures::{Stream, Sink, Async, AsyncSink};
 use futures::sync::{mpsc, oneshot};
 use super::*;
 
-#[derive(Debug)]
-pub enum RelayError<A, B> {
-    IncorrectClientIdInCommand,
-    BrokenPipe(String),
-    QueueLimitExceeded(String),
-    Tx(A),
-    Rx(B),
-}
-
 pub struct ClientRelay<A, B, T, R>
     where A: Sink<SinkItem = T> + 'static,
           B: Stream<Item = R> + 'static,
           A::SinkError: Debug,
           B::Error: Debug,
-          T: Clone + Debug + PartialEq + Send + 'static,
-          R: Clone + Debug + PartialEq + Send + 'static
+          T: Send + 'static,
+          R: Send + 'static
 {
     id: ClientId,
-    name: Option<String>,
     queue_limit: Option<usize>,
     tx_relay: ClientRelayTx<A, T>,
     rx_relay: ClientRelayRx<B, R>,
@@ -34,25 +24,22 @@ impl<A, B, T, R> ClientRelay<A, B, T, R>
           B: Stream<Item = R> + 'static,
           A::SinkError: Debug,
           B::Error: Debug,
-          T: Clone + Debug + PartialEq + Send + 'static,
-          R: Clone + Debug + PartialEq + Send + 'static
+          T: Send + 'static,
+          R: Send + 'static
 {
     pub fn new(id: ClientId,
-               name: Option<String>,
-               queue_limit: Option<usize>,
                tx: A,
-               rx: B)
-               -> (ClientRelay<A, B, T, R>, mpsc::Sender<Command<T, R>>) {
-        let (cmd_tx, cmd_rx) = mpsc::channel(queue_limit.unwrap_or(3));
-        let client_relay = ClientRelay {
+               rx: B,
+               cmd_rx: mpsc::Receiver<Command<T, R>>,
+               queue_limit: Option<usize>)
+               -> ClientRelay<A, B, T, R> {
+        ClientRelay {
             id: id,
-            name: name,
             queue_limit: queue_limit,
             tx_relay: ClientRelayTx::new(tx),
             rx_relay: ClientRelayRx::new(rx),
             cmd_rx: cmd_rx,
-        };
-        (client_relay, cmd_tx)
+        }
     }
 
     // It would be nice to make all `Command` come with a oneshot reply. That way the
@@ -132,8 +119,8 @@ impl<A, B, T, R> Future for ClientRelay<A, B, T, R>
           B: Stream<Item = R> + 'static,
           A::SinkError: Debug,
           B::Error: Debug,
-          T: Clone + Debug + PartialEq + Send + 'static,
-          R: Clone + Debug + PartialEq + Send + 'static
+          T: Send + 'static,
+          R: Send + 'static
 {
     type Item = ();
     type Error = RelayError<A::SinkError, B::Error>;
@@ -166,7 +153,7 @@ impl<A, B, T, R> Future for ClientRelay<A, B, T, R>
 struct ClientRelayTx<A, T>
     where A: Sink<SinkItem = T> + 'static,
           A::SinkError: Debug,
-          T: Clone + Debug + PartialEq + Send + 'static
+          T: Send + 'static
 {
     tx: A,
     buffer: VecDeque<T>,
@@ -175,7 +162,7 @@ struct ClientRelayTx<A, T>
 impl<A, T> ClientRelayTx<A, T>
     where A: Sink<SinkItem = T> + 'static,
           A::SinkError: Debug,
-          T: Clone + Debug + PartialEq + Send + 'static
+          T: Send + 'static
 {
     fn new(tx: A) -> ClientRelayTx<A, T> {
         ClientRelayTx {
@@ -214,7 +201,7 @@ impl<A, T> ClientRelayTx<A, T>
 struct ClientRelayRx<B, R>
     where B: Stream<Item = R> + 'static,
           B::Error: Debug,
-          R: Clone + Debug + PartialEq + Send + 'static
+          R: Send + 'static
 {
     rx: B,
     buffer: VecDeque<R>,
@@ -225,7 +212,7 @@ struct ClientRelayRx<B, R>
 impl<B, R> ClientRelayRx<B, R>
     where B: Stream<Item = R> + 'static,
           B::Error: Debug,
-          R: Clone + Debug + PartialEq + Send + 'static
+          R: Send + 'static
 {
     fn new(rx: B) -> ClientRelayRx<B, R> {
         ClientRelayRx {

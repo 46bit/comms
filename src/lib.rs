@@ -2,12 +2,12 @@ extern crate futures;
 extern crate uuid;
 
 mod client;
+mod client_relay;
 mod room;
-mod relay;
 
 pub use self::client::*;
+pub use self::client_relay::*;
 pub use self::room::*;
-pub use self::relay::*;
 
 use futures::{Future, Poll, BoxFuture};
 use uuid::Uuid;
@@ -77,6 +77,15 @@ pub trait Communicator {
     fn close(&mut self) -> BoxFuture<Self::Status, Self::Error>;
 }
 
+#[derive(Debug)]
+pub enum RelayError<A, B> {
+    IncorrectClientIdInCommand,
+    BrokenPipe(String),
+    QueueLimitExceeded(String),
+    Tx(A),
+    Rx(B),
+}
+
 // Utilities for testing `Communicator` implementations.
 #[cfg(test)]
 mod test {
@@ -109,6 +118,6 @@ mod test {
     }
 
     pub fn mock_client(tx: mpsc::Sender<TinyCommand>) -> Client<TinyMsg, TinyMsg> {
-        Client::new(None, tx)
+        Client::new(Uuid::new_v4(), None, tx)
     }
 }

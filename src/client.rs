@@ -1,6 +1,26 @@
 use super::*;
-use futures::{Sink, Future, BoxFuture, future};
+use std::fmt::Debug;
+use futures::{Sink, Stream, Future, BoxFuture, future};
 use futures::sync::{mpsc, oneshot};
+
+pub fn client<A, B, T, R>(name: Option<String>,
+                          queue_limit: Option<usize>,
+                          tx: A,
+                          rx: B)
+                          -> (Client<T, R>, ClientRelay<A, B, T, R>)
+    where A: Sink<SinkItem = T> + 'static,
+          B: Stream<Item = R> + 'static,
+          A::SinkError: Debug,
+          B::Error: Debug,
+          T: Send + 'static,
+          R: Send + 'static
+{
+    let id = Uuid::new_v4();
+    let (cmd_tx, cmd_rx) = mpsc::channel(queue_limit.unwrap_or(3));
+    let client = Client::new(id, name, cmd_tx);
+    let client_relay = ClientRelay::new(id, tx, rx, cmd_rx, queue_limit);
+    (client, client_relay)
+}
 
 #[derive(Clone)]
 pub struct Client<T, R>
@@ -19,9 +39,12 @@ impl<T, R> Client<T, R>
     where T: Send + 'static,
           R: Send + 'static
 {
-    pub fn new(name: Option<String>, cmd_tx: mpsc::Sender<Command<T, R>>) -> Client<T, R> {
+    pub fn new(id: Uuid,
+               name: Option<String>,
+               cmd_tx: mpsc::Sender<Command<T, R>>)
+               -> Client<T, R> {
         Client {
-            id: Uuid::new_v4(),
+            id: id,
             name: name,
             cmd_tx: cmd_tx,
         }
