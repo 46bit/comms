@@ -24,6 +24,10 @@ impl<T, R> Room<T, R>
         self.clients.keys().cloned().collect()
     }
 
+    pub fn client_names(&self) -> Vec<Option<String>> {
+        self.clients.values().map(|c| c.name()).collect()
+    }
+
     // @TODO: Exists only for `Client::join`. When RFC1422 is stable, make this `pub(super)`.
     #[doc(hidden)]
     pub fn insert(&mut self, client: Client<T, R>) -> bool {
@@ -47,6 +51,14 @@ impl<T, R> Room<T, R>
               G: Future
     {
         join_all(self.clients.values_mut().map(f).collect::<Vec<_>>())
+    }
+
+    pub fn broadcast(&mut self, msg: T) -> BoxFuture<<Self as Communicator>::Status, ()>
+        where T: Clone
+    {
+        self.communicate_with_all_clients(|client| client.transmit(msg.clone()))
+            .map(|results| results.into_iter().collect())
+            .boxed()
     }
 }
 
