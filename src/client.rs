@@ -58,6 +58,10 @@ impl<T, R> Client<T, R>
         self.name.clone()
     }
 
+    pub fn rename(&mut self, name: Option<String>) {
+        self.name = name;
+    }
+
     pub fn join(self, room: &mut Room<T, R>) -> bool {
         room.insert(self)
     }
