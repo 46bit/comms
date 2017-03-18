@@ -87,8 +87,7 @@ impl<T, R> Client<T, R>
         let id = self.id;
         self.command(cmd)
             .then(move |v| match v {
-                Ok(s) => future::ok((id, s)),
-                Err(s) => future::ok((id, s)),
+                Ok(s) | Err(s) => future::ok((id, s)),
             })
             .boxed()
     }

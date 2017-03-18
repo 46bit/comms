@@ -114,7 +114,7 @@ impl<T, R> Communicator for Room<T, R>
             .map(|results| {
                 let mut statuses = HashMap::new();
                 let mut msgs = HashMap::new();
-                for (id, status, msg) in results.into_iter() {
+                for (id, status, msg) in results {
                     statuses.insert(id, status);
                     msg.and_then(|msg| msgs.insert(id, msg));
                 }
