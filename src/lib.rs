@@ -4,6 +4,7 @@ extern crate uuid;
 mod client;
 mod client_relay;
 mod room;
+pub mod capped_buffer;
 
 pub use self::client::*;
 pub use self::client_relay::*;
