@@ -136,6 +136,25 @@ impl<T, R> Communicator for Room<T, R>
     }
 }
 
+pub trait Broadcasting {
+    type M;
+    type Status;
+
+    fn broadcast(&mut self, msg: Self::M) -> BoxFuture<(Self::Status, Self::Status), ()>;
+}
+
+impl<T, R> Broadcasting for (Room<T, R>, Room<T, R>)
+    where T: Clone + Send + 'static,
+          R: Send + 'static
+{
+    type M = T;
+    type Status = <Room<T, R> as Communicator>::Status;
+
+    fn broadcast(&mut self, msg: T) -> BoxFuture<(Self::Status, Self::Status), ()> {
+        self.0.broadcast(msg.clone()).join(self.1.broadcast(msg)).boxed()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
