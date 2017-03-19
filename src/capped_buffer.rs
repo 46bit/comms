@@ -9,35 +9,35 @@ pub enum CappedError<E> {
 }
 
 /// A wrapper around a buffer that
-pub struct CappedBufferedStream<S, I>
-    where S: Stream<Item = I>
+pub struct CappedBufferedStream<S>
+    where S: Stream
 {
     rx: stream::Fuse<S>,
     will_not_read_again: bool,
     buffer_size: usize,
-    buffer: VecDeque<Result<I, CappedError<S::Error>>>,
+    buffer: VecDeque<Result<S::Item, CappedError<S::Error>>>,
 }
 
-impl<S, I> CappedBufferedStream<S, I>
-    where S: Stream<Item = I>
+impl<S> CappedBufferedStream<S>
+    where S: Stream
 {
     pub fn buffer_size(&self) -> usize {
         self.buffer_size
     }
 
     #[doc(hidden)]
-    pub fn into_inner(self) -> (S, VecDeque<Result<I, CappedError<S::Error>>>) {
+    pub fn into_inner(self) -> (S, VecDeque<Result<S::Item, CappedError<S::Error>>>) {
         (self.rx.into_inner(), self.buffer)
     }
 }
 
-impl<S, I> Stream for CappedBufferedStream<S, I>
-    where S: Stream<Item = I>
+impl<S> Stream for CappedBufferedStream<S>
+    where S: Stream
 {
-    type Item = I;
+    type Item = S::Item;
     type Error = CappedError<S::Error>;
 
-    fn poll(&mut self) -> Poll<Option<I>, CappedError<S::Error>> {
+    fn poll(&mut self) -> Poll<Option<S::Item>, CappedError<S::Error>> {
         if !self.will_not_read_again {
             if let Some(item) = match self.rx.poll() {
                 Ok(Async::NotReady) => None,
@@ -73,28 +73,30 @@ impl<S, I> Stream for CappedBufferedStream<S, I>
     }
 }
 
-pub struct CappedBufferedSink<S, I>
-    where S: Sink<SinkItem = I>
+pub struct CappedBufferedSink<S>
+    where S: Sink
 {
     buffer_size: usize,
     buffered_tx: sink::Buffer<S>,
 }
 
-impl<S, I> CappedBufferedSink<S, I>
-    where S: Sink<SinkItem = I>
+impl<S> CappedBufferedSink<S>
+    where S: Sink
 {
     pub fn buffer_size(&self) -> usize {
         self.buffer_size
     }
 }
 
-impl<S, I> Sink for CappedBufferedSink<S, I>
-    where S: Sink<SinkItem = I>
+impl<S> Sink for CappedBufferedSink<S>
+    where S: Sink
 {
-    type SinkItem = I;
+    type SinkItem = S::SinkItem;
     type SinkError = CappedError<S::SinkError>;
 
-    fn start_send(&mut self, item: I) -> StartSend<I, CappedError<S::SinkError>> {
+    fn start_send(&mut self,
+                  item: S::SinkItem)
+                  -> StartSend<S::SinkItem, CappedError<S::SinkError>> {
         match self.buffered_tx.start_send(item) {
             Ok(AsyncSink::NotReady(_)) => Err(CappedError::CapExceeded),
             Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
