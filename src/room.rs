@@ -1,40 +1,39 @@
-use super::*;
+use std::fmt::Debug;
 use std::collections::HashMap;
-use futures::{Future, BoxFuture};
-use futures::future::{join_all, JoinAll};
+use futures::{future, Future, BoxFuture, Sink, Stream};
+
+use super::*;
 
 #[derive(Clone)]
-pub struct Room<T, R>
-    where T: Send + 'static,
-          R: Send + 'static
+pub struct Room<I, T, R>
+    where I: Clone + Send + Debug + 'static,
+          T: Sink + 'static,
+          R: Stream + 'static
 {
-    clients: HashMap<ClientId, Client<T, R>>,
+    clients: HashMap<I, Client<I, T, R>>,
 }
 
-impl<T, R> Room<T, R>
-    where T: Send + 'static,
-          R: Send + 'static
+impl<I, T, R> Room<I, T, R>
+    where I: Clone + Send + Debug + 'static,
+          T: Sink + 'static,
+          R: Stream + 'static
 {
     pub fn new(clients: Vec<Client<T, R>>) -> Room<T, R> {
         let clients = clients.into_iter().map(|c| (c.id(), c)).collect();
         Room { clients: clients }
     }
 
-    pub fn client_ids(&self) -> Vec<ClientId> {
+    pub fn ids(&self) -> Vec<I> {
         self.clients.keys().cloned().collect()
     }
 
-    pub fn client_names(&self) -> Vec<Option<String>> {
-        self.clients.values().map(|c| c.name()).collect()
-    }
-
-    pub fn into_clients(self) -> Vec<Client<T, R>> {
-        self.clients.into_iter().map(|(_, c)| c).collect()
+    pub fn into_clients(self) -> HashMap<I, Client<I, T, R>> {
+        self.clients
     }
 
     // @TODO: Exists only for `Client::join`. When RFC1422 is stable, make this `pub(super)`.
     #[doc(hidden)]
-    pub fn insert(&mut self, client: Client<T, R>) -> bool {
+    pub fn insert(&mut self, client: Client<I, T, R>) -> bool {
         if self.contains(&client.id()) {
             return false;
         }
@@ -42,71 +41,71 @@ impl<T, R> Room<T, R>
         true
     }
 
-    pub fn remove(&mut self, id: &ClientId) -> Option<Client<T, R>> {
+    pub fn remove(&mut self, id: &I) -> Option<Client<I, T, R>> {
         self.clients.remove(id)
     }
 
-    pub fn contains(&self, id: &ClientId) -> bool {
+    pub fn contains(&self, id: &I) -> bool {
         self.clients.contains_key(id)
     }
 
-    pub fn name_of(&self, id: &ClientId) -> Option<String> {
+    pub fn name_of(&self, id: &I) -> Option<String> {
         self.clients.get(id).and_then(|c| c.name())
     }
 
-    // *Copies* filtered clients into another Room.
-    pub fn filter<F>(&self, mut f: F) -> Room<T, R>
+    pub fn filter_by_ids<F>(&self, ids: Vec<&I>) -> FilteredRoom<I, T, R>
         where F: FnMut(&Client<T, R>) -> bool,
               T: Clone,
               R: Clone
     {
-        let filtered_client_clones = self.clients.values().filter(|c| f(c)).cloned().collect();
-        Room::new(filtered_client_clones)
+        FilteredRoom {
+            room_inner: self.inner.clone(),
+            client_ids: ids
+        }
     }
 
-    fn client_mut(&mut self, id: &ClientId) -> Option<&mut Client<T, R>> {
+    /// Filter the room
+    pub fn filter<F>(&mut self, mut f: F) -> FilteredRoom<T, R>
+        where F: FnMut(&Client<T, R>) -> bool,
+              T: Clone,
+              R: Clone
+    {
+        WheredRoom {
+            room: &mut self,
+            f: f
+        }
+    }
+
+    fn client_mut(&mut self, id: &I) -> Option<&mut Client<T, R>> {
         self.clients.get_mut(id)
-    }
-
-    fn communicate_with_all_clients<F, G>(&mut self, f: F) -> JoinAll<Vec<G>>
-        where F: FnMut(&mut Client<T, R>) -> G,
-              G: Future
-    {
-        join_all(self.clients.values_mut().map(f).collect::<Vec<_>>())
-    }
-
-    pub fn broadcast(&mut self, msg: T) -> BoxFuture<<Self as Communicator>::Status, ()>
-        where T: Clone
-    {
-        self.communicate_with_all_clients(|client| client.transmit(msg.clone()))
-            .map(|results| results.into_iter().collect())
-            .boxed()
     }
 }
 
-impl<T, R> Default for Room<T, R>
-    where T: Send + 'static,
-          R: Send + 'static
+impl<I, T, R> Default for Room<I, T, R>
+    where I: Clone + Send + Debug + 'static,
+          T: Sink + 'static,
+          R: Stream + 'static
 {
     fn default() -> Room<T, R> {
         Room { clients: HashMap::new() }
     }
 }
 
-impl<T, R> Communicator for Room<T, R>
-    where T: Send + 'static,
-          R: Send + 'static
+impl<I, T, R> Communicator for Room<I, T, R>
+    where I: Clone + Send + Debug + 'static,
+          T: Sink + 'static,
+          R: Stream + 'static
 {
-    type Transmit = HashMap<ClientId, T>;
-    type Receive = (HashMap<ClientId, ClientStatus>, HashMap<ClientId, R>);
-    type Status = HashMap<ClientId, ClientStatus>;
+    type Transmit = HashMap<I, T>;
+    type Receive = (HashMap<I, ClientStatus>, HashMap<I, R>);
+    type Status = HashMap<I, ClientStatus>;
     type Error = ();
 
     fn transmit(&mut self, msgs: Self::Transmit) -> BoxFuture<Self::Status, ()> {
         let client_futures = msgs.into_iter()
             .filter_map(|(id, msg)| self.client_mut(&id).map(|client| client.transmit(msg)))
             .collect::<Vec<_>>();
-        join_all(client_futures).map(|results| results.into_iter().collect()).boxed()
+        future::join_all(client_futures).map(|results| results.into_iter().collect()).boxed()
     }
 
     fn receive(&mut self, timeout: ClientTimeout) -> BoxFuture<Self::Receive, ()> {
@@ -143,8 +142,9 @@ pub trait Broadcasting {
     fn broadcast(&mut self, msg: Self::M) -> BoxFuture<(Self::Status, Self::Status), ()>;
 }
 
-impl<T, R> Broadcasting for (Room<T, R>, Room<T, R>)
-    where T: Clone + Send + 'static,
+impl<I, T, R> Broadcasting for (Room<I, T, R>, Room<I, T, R>)
+    where I: Clone + Send + Debug + 'static,
+          T: Clone + Send + 'static,
           R: Send + 'static
 {
     type M = T;

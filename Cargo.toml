@@ -5,7 +5,6 @@ authors = ["Michael Mokrysz <hi@46b.it>"]
 
 [dependencies]
 futures = "0.1"
-uuid = { version = "0.4", features = ["v4"] }
 clippy = {version = "*", optional = true}
 
 [dev-dependencies]
