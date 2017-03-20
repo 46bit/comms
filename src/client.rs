@@ -201,29 +201,31 @@ mod tests {
 
     #[test]
     fn can_join_room() {
-        let (_, client0) = mock_client_channelled();
-        let (_, client1) = mock_client_channelled();
+        let client0_id = "client0";
+        let client1_id = "client1";
+
+        let (_, _, client0) = mock_client(client0_id.clone(), 1);
+        let (_, _, client0_duplicate_name) = mock_client(client0_id, 1);
+        let (_, _, client1) = mock_client(client1_id.clone(), 1);
 
         // Adding of a `Client` to a `Room` returns `true`.
         let mut room = Room::default();
-        assert_eq!(room.client_ids().len(), 0);
-        assert!(client0.clone().join(&mut room));
-        assert_eq!(room.client_ids(), vec![client0.id]);
+        assert_eq!(room.ids().len(), 0);
+        assert!(client0.join(&mut room));
+        assert_eq!(room.ids(), vec![client0_id.to_string()].into_iter().collect());
 
         // Adding a `Client` whose ID was already present returns `false` and doesn't
         // add a duplicate.
-        let client0_id = client0.id;
-        assert!(!client0.join(&mut room));
-        assert_eq!(room.client_ids(), vec![client0_id]);
+        assert!(!client0_duplicate_name.join(&mut room));
+        assert_eq!(room.ids(), vec![client0_id.to_string()].into_iter().collect());
 
         // Adding a different-IDed `Client` to a `Room` works.
-        let client1_id = client1.id;
         assert!(client1.join(&mut room));
         // Extended comparison necessary because ordering not preserved.
-        let client_ids = room.client_ids();
+        let client_ids = room.ids();
         assert!(client_ids.len() == 2);
-        assert!(client_ids.contains(&client0_id));
-        assert!(client_ids.contains(&client1_id));
+        assert!(client_ids.contains(&client0_id.to_string()));
+        assert!(client_ids.contains(&client1_id.to_string()));
     }
 
     #[test]

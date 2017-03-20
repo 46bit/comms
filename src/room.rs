@@ -117,25 +117,36 @@ mod tests {
     use super::test::*;
     use futures::Stream;
 
+    // #[test]
+    // fn can_transmit() {
+    //     let (rx0, client0) = mock_client_channelled();
+    //     let mut client0_rx = rx0.wait().peekable();
+    //     let client0_id = client0.id();
+
+    //     let (rx1, client1) = mock_client_channelled();
+    //     let mut client1_rx = rx1.wait().peekable();
+    //     let client1_id = client1.id();
+
+    //     let mut room = Room::new(vec![client0, client1]);
+
+    //     let mut msgs = HashMap::new();
+    //     msgs.insert(client0_id, TinyMsg::A);
+    //     msgs.insert(client1_id, TinyMsg::B("entropy".to_string()));
+    //     room.transmit(msgs).wait().unwrap();
+    //     match (client0_rx.next(), client1_rx.next()) {
+    //         (Some(Ok(_)), Some(Ok(_))) => {}
+    //         _ => assert!(false),
+    //     }
+    // }
+
     #[test]
-    fn can_transmit() {
-        let (rx0, client0) = mock_client_channelled();
-        let mut client0_rx = rx0.wait().peekable();
-        let client0_id = client0.id();
-
-        let (rx1, client1) = mock_client_channelled();
-        let mut client1_rx = rx1.wait().peekable();
-        let client1_id = client1.id();
-
+    fn can_broadcast() {
+        let (rx0, _, client0) = mock_client("client0", 1);
+        let (rx1, _, client1) = mock_client("client1", 1);
         let mut room = Room::new(vec![client0, client1]);
 
-        let mut msgs = HashMap::new();
-        msgs.insert(client0_id, TinyMsg::A);
-        msgs.insert(client1_id, TinyMsg::B("entropy".to_string()));
-        room.transmit(msgs).wait().unwrap();
-        match (client0_rx.next(), client1_rx.next()) {
-            (Some(Ok(_)), Some(Ok(_))) => {}
-            _ => assert!(false),
-        }
+        room.broadcast(TinyMsg::A).wait().unwrap();
+        assert_eq!(rx0.into_future().wait().unwrap().0, Some(TinyMsg::A));
+        assert_eq!(rx1.into_future().wait().unwrap().0, Some(TinyMsg::A));
     }
 }
