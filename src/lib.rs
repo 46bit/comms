@@ -1,24 +1,34 @@
 extern crate futures;
+extern crate tokio_timer;
 
 mod client;
-mod room;
+//mod room;
 
 pub use self::client::*;
-pub use self::room::*;
+//pub use self::room::*;
 
 use std::time::Duration;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ClientError<T, R> {
+    Closed,
+    Timeout,
+    Timer(tokio_timer::TimerError),
+    SinkError(T),
+    StreamError(R),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ClientStatus<T, R> {
+    Ready,
+    Gone(ClientError<T, R>),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClientTimeout {
     None,
     KeepAliveAfter(Duration),
     DisconnectAfter(Duration),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ClientStatus {
-    Ready,
-    Gone,
 }
 
 impl ClientTimeout {
@@ -33,6 +43,14 @@ impl ClientTimeout {
         match maybe_duration {
             Some(duration) => ClientTimeout::DisconnectAfter(duration),
             None => ClientTimeout::None,
+        }
+    }
+
+    pub fn duration(&self) -> Option<Duration> {
+        match *self {
+            ClientTimeout::None => None,
+            ClientTimeout::KeepAliveAfter(d) => Some(d),
+            ClientTimeout::DisconnectAfter(d) => Some(d),
         }
     }
 }

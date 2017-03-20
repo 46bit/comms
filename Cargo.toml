@@ -5,6 +5,7 @@ authors = ["Michael Mokrysz <hi@46b.it>"]
 
 [dependencies]
 futures = "0.1"
+tokio-timer = { git = "https://github.com/sirpent-team/tokio-timer", branch = "traits" }
 clippy = {version = "*", optional = true}
 
 [dev-dependencies]

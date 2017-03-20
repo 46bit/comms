@@ -36,7 +36,7 @@ let b = room1.receive(ClientTimeout::_);
 // A very JavaScripty Futures API would be:
 room1.transmit(TinyMsg::A)
      .receive(ClientTimeout::_)
-     .into_future().and_then(|room1| { ... })
+     .into_future().and_then(|(rx, room1)| { ... })
 // vs typical Tokio
 room1.transmit(TinyMsg::A)
      .and_then(|room1| room1.receive(ClientTimeout::_))
@@ -59,8 +59,11 @@ impl IntoFuture for RoomAction // ... or I suppose it could already be a Future
 //
 // if doing all this I'd rather have Room not be a Sink nor a Stream, just to direct people
 // through this API. I am reimplementing bits of futures, sure, but I think there's value-add
-// in that the Room operations cannot fail. I could use a Void error type to make that clear -
-// but I can't because it'd need mapping by people sometimes.
+// in that the Room operations cannot fail.
+//
+// if I want to chain multiple receives there'd be a type problem to build a simple future chain
+// inside of RoomAction - what would the future's Item value be? this can be worked around to
+// allow multiple receives, maybe, but with one function definition per level.
 ```
 
 ``` rust
@@ -79,4 +82,38 @@ let room1_f_a = room1.filter(|c| c.something == something);
 let room1_f_b = room1.filter(|c| c.something2 == something2);
 ...
 // This would seem to require extra synchronisation primitives as discussed elsewhere.
+```
+
+## What if you didn't merge Stream + Sink, or had easy ways to break them apart?
+
+``` rust
+// normally without the `ClientTimeout` we could use split
+let (room_tx, room_rx) = room.split();
+let msg = TinyMsg::A;
+let timeout = ClientTimeout::_;
+(room_tx.transmit(msg), room_rx.receive(timeout)).and_then(|(room_tx, room_rx)| {
+    let room = Room::unsplit(room_tx, room_rx);
+})
+```
+
+## Conclusion: types
+
+``` rust
+struct Client<I, R, T> {
+    id: I,
+    inner: Option<ClientInner<T, R>>,
+}
+struct ClientInner<T, R>
+    where T: Sink + 'static,
+          R: Stream + 'static
+{
+    tx: T,
+    rx: R,
+}
+```
+
+``` rust
+struct Room<I, R, T> {
+    clients: HashMap<I, Client<I, R, T>>
+}
 ```
