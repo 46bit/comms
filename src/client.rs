@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use futures::{future, sink, stream, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
+use futures::{future, Future, Sink, Stream, Poll, Async};
 use tokio_timer;
 use super::*;
 
@@ -245,12 +245,15 @@ mod tests {
             tx_to_client = tx_to_client.send(msg.clone()).wait().unwrap();
 
             match future.wait_future() {
-                Ok((maybe_msg, client)) => {
+                Ok((maybe_msg, client_new)) => {
+                    client = client_new;
                     assert_eq!("client1", client.id());
                     assert_eq!(msg, maybe_msg.unwrap());
                 }
-                _ => assert!(false),
-            }
+                _ => {
+                    unreachable!();
+                },
+            };
         }
     }
 
@@ -260,36 +263,33 @@ mod tests {
 
         let (mut rx_from_client, _, client) = mock_client("client1", 1);
         assert!(client.status().ready());
+        // Check unfortunate edgecase that a closed channel is not noticed until the next
+        // IO action.
         let _ = rx_from_client.close();
         assert!(client.status().ready());
 
         let (_, mut tx_to_client, client) = mock_client("client2", 1);
         assert!(client.status().ready());
         let _ = tx_to_client.close();
+        // Check unfortunate edgecase that a closed channel is not noticed until the next
+        // IO action.
         assert!(client.status().ready());
 
+        // Assert that status with dropped channels indicates the client is gone.
         let (_, _, client) = mock_client("client2", 1);
         assert!(client.status().ready());
-        assert!(client.transmit(msg.clone()).wait().is_err());
-        //assert_eq!(client.status_sync(), ClientStatus::Gone);
+        match client.transmit(msg.clone()).wait() {
+            Ok(_) => unreachable!(),
+            Err(client) => assert!(client.status().gone().is_some())
+        };
     }
 
-    // #[test]
-    // fn can_close() {
-    //     let (tx, rx) = mpsc::channel(1);
-    //     let mut rx_stream = rx.wait().peekable();
-    //     let mut client = mock_client(tx);
-
-    //     for _ in 0..10 {
-    //         let msg = TinyMsg::B("test".to_string());
-    //         client.transmit(msg.clone()).wait().unwrap();
-    //         match rx_stream.next() {
-    //             Some(Ok(Command::Transmit(client_id, msg2))) => {
-    //                 assert_eq!(client_id, client.id());
-    //                 assert_eq!(msg, msg2);
-    //             }
-    //             _ => assert!(false),
-    //         }
-    //     }
-    // }
+    #[test]
+    fn can_close() {
+        let (_, _, mut client) = mock_client("client1", 1);
+        assert!(client.status().ready());
+        client.close();
+        assert!(client.status().gone().is_some());
+        // @TODO: Check channels are gone.
+    }
 }
