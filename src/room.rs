@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::collections::{HashMap, HashSet};
-use futures::{Sink, Stream};
+use futures::{future, Future, Sink, Stream};
 
 use super::*;
 
@@ -76,12 +76,26 @@ impl<I, T, R> Room<I, T, R>
     //     }
     // }
 
-    // pub fn broadcast(self, msg: T::Item) -> BoxFuture<Item = Self> {
-    //     let client_futures = self.clients
-    //         .into_iter()
-    //         .map(|(id, client)| client.transmit(msg.clone()).then(|result| (id, result)))
-    //         .collect();
-    // }
+    pub fn broadcast(mut self, msg: T::SinkItem) -> Box<Future<Item = Self, Error = ()>>
+        where T::SinkItem: Clone
+    {
+        let futures =
+            self.ready_clients
+                .drain()
+                .map(|(id, client)| {
+                    client.transmit(msg.clone()).then(|result| future::ok((id, result)))
+                })
+                .collect::<Vec<_>>();
+        Box::new(future::join_all(futures).map(|results| {
+            for (id, result) in results {
+                match result {
+                    Ok(ready_client) => self.ready_clients.insert(id, ready_client),
+                    Err(gone_client) => self.gone_clients.insert(id, gone_client),
+                };
+            }
+            self
+        }))
+    }
 }
 
 impl<I, T, R> Default for Room<I, T, R>
