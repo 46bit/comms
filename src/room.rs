@@ -117,6 +117,14 @@ impl<I, T, R> Room<I, T, R>
             self
         }))
     }
+
+    // @TODO: When client has a method to check its status against the internal rx/tx,
+    // update this to use it (or make a new method to.)
+    pub fn statuses(&self) -> HashMap<I, ClientStatus<T::SinkError, R::Error>> {
+        let rs = self.ready_clients.iter().map(|(id, client)| (id.clone(), client.status()));
+        let gs = self.gone_clients.iter().map(|(id, client)| (id.clone(), client.status()));
+        rs.chain(gs).collect()
+    }
 }
 
 impl<I, T, R> Default for Room<I, T, R>
@@ -164,5 +172,32 @@ mod tests {
         assert_eq!(rx0.into_future().wait().unwrap().0, Some(TinyMsg::A));
         assert_eq!(rx1.into_future().wait().unwrap().0,
                    Some(TinyMsg::B("entropy".to_string())));
+    }
+
+    #[test]
+    fn can_statuses() {
+        let (_, _, client0) = mock_client("client0", 1);
+        let (_, _, client1) = mock_client("client1", 1);
+
+        let mut room = Room::new(vec![client0, client1]);
+        for (_, status) in room.statuses() {
+            assert!(status.ready());
+        }
+
+        let mut msgs = HashMap::new();
+        msgs.insert("client0".to_string(), TinyMsg::A);
+        room = room.transmit(msgs).wait().unwrap();
+        for (id, status) in room.statuses() {
+            if id == "client0".to_string() {
+                assert!(status.gone().is_some());
+            } else {
+                assert!(status.ready());
+            }
+        }
+
+        room = room.broadcast(TinyMsg::B("abc".to_string())).wait().unwrap();
+        for (_, status) in room.statuses() {
+            assert!(status.gone().is_some());
+        }
     }
 }
