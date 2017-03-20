@@ -89,9 +89,9 @@ impl<I, T, R> Client<I, T, R>
     //     Ok((None, client))
     // else
     //     unreachable!()
-    pub fn receive<'a>(self,
-                       timeout: ClientTimeout<'static>)
-                       -> Box<Future<Item = (Option<R::Item>, Self), Error = Self>> {
+    pub fn receive(self,
+                   timeout: ClientTimeout<'static>)
+                   -> Box<Future<Item = (Option<R::Item>, Self), Error = Self>> {
         // Lack of debug and partialeq requirement on error items requires this code.
         if let Ok(inner) = self.inner {
             let id = self.id;
@@ -117,9 +117,9 @@ impl<I, T, R> Client<I, T, R>
         }
     }
 
-    pub fn status<'a>(&'a self) -> ClientStatus<'a, T::SinkError, R::Error> {
+    pub fn status(&self) -> ClientStatus<T::SinkError, R::Error> {
         if let Err(ref e) = self.inner {
-            ClientStatus::Gone(&e)
+            ClientStatus::Gone(e)
         } else {
             ClientStatus::Ready
         }

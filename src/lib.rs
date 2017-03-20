@@ -77,7 +77,7 @@ impl<'a> ClientTimeout<'a> {
     pub fn duration_timer(&self) -> Option<(Duration, &tokio_timer::Timer)> {
         match *self {
             ClientTimeout::None => None,
-            ClientTimeout::KeepAliveAfter(d, t) => Some((d, t)),
+            ClientTimeout::KeepAliveAfter(d, t) |
             ClientTimeout::DisconnectAfter(d, t) => Some((d, t)),
         }
     }
