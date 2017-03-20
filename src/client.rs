@@ -122,8 +122,20 @@ impl<I, T, R> Client<I, T, R>
         }
     }
 
+    // @TODO: Implement a method to check that neither stream has been dropped. This can be
+    // done with just two poll calls, but sometimes poll requires to be on a task. I really
+    // want to hide abstractions, so maybe returning a Future is best to make clear it might
+    // require being on a task.
+    //
+    // It doesn't seem obviously possible to `executor::spawn().poll_future()`. There's an
+    // `Unpark` argument to `poll_future` that we don't have a good value for.
+    #[doc(hidden)]
+    pub fn update_status(self) -> Box<Future<Item = (Option<R::Item>, Self), Error = Self>> {
+        unimplemented!();
+    }
+
+    // N.B., Erases any existing error. This seems the least-odd thing to do.
     pub fn close(&mut self) {
-        // N.B., Erases any existing error. This seems the least-odd thing to do.
         self.inner = Err(ClientError::Closed);
     }
 
@@ -252,7 +264,7 @@ mod tests {
                 }
                 _ => {
                     unreachable!();
-                },
+                }
             };
         }
     }
@@ -280,7 +292,7 @@ mod tests {
         assert!(client.status().ready());
         match client.transmit(msg.clone()).wait() {
             Ok(_) => unreachable!(),
-            Err(client) => assert!(client.status().gone().is_some())
+            Err(client) => assert!(client.status().gone().is_some()),
         };
     }
 
