@@ -212,12 +212,14 @@ mod tests {
         let mut room = Room::default();
         assert_eq!(room.ids().len(), 0);
         assert!(client0.join(&mut room));
-        assert_eq!(room.ids(), vec![client0_id.to_string()].into_iter().collect());
+        assert_eq!(room.ids(),
+                   vec![client0_id.to_string()].into_iter().collect());
 
         // Adding a `Client` whose ID was already present returns `false` and doesn't
         // add a duplicate.
         assert!(!client0_duplicate_name.join(&mut room));
-        assert_eq!(room.ids(), vec![client0_id.to_string()].into_iter().collect());
+        assert_eq!(room.ids(),
+                   vec![client0_id.to_string()].into_iter().collect());
 
         // Adding a different-IDed `Client` to a `Room` works.
         assert!(client1.join(&mut room));

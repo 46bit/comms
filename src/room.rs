@@ -96,6 +96,27 @@ impl<I, T, R> Room<I, T, R>
             self
         }))
     }
+
+    pub fn transmit(mut self,
+                    msgs: HashMap<I, T::SinkItem>)
+                    -> Box<Future<Item = Self, Error = ()>> {
+        let futures = msgs.into_iter()
+            .filter_map(|(id, msg)| {
+                self.ready_clients
+                    .remove(&id)
+                    .map(|client| client.transmit(msg).then(|result| future::ok((id, result))))
+            })
+            .collect::<Vec<_>>();
+        Box::new(future::join_all(futures).map(|results| {
+            for (id, result) in results {
+                match result {
+                    Ok(ready_client) => self.ready_clients.insert(id, ready_client),
+                    Err(gone_client) => self.gone_clients.insert(id, gone_client),
+                };
+            }
+            self
+        }))
+    }
 }
 
 impl<I, T, R> Default for Room<I, T, R>
@@ -117,36 +138,31 @@ mod tests {
     use super::test::*;
     use futures::Stream;
 
-    // #[test]
-    // fn can_transmit() {
-    //     let (rx0, client0) = mock_client_channelled();
-    //     let mut client0_rx = rx0.wait().peekable();
-    //     let client0_id = client0.id();
-
-    //     let (rx1, client1) = mock_client_channelled();
-    //     let mut client1_rx = rx1.wait().peekable();
-    //     let client1_id = client1.id();
-
-    //     let mut room = Room::new(vec![client0, client1]);
-
-    //     let mut msgs = HashMap::new();
-    //     msgs.insert(client0_id, TinyMsg::A);
-    //     msgs.insert(client1_id, TinyMsg::B("entropy".to_string()));
-    //     room.transmit(msgs).wait().unwrap();
-    //     match (client0_rx.next(), client1_rx.next()) {
-    //         (Some(Ok(_)), Some(Ok(_))) => {}
-    //         _ => assert!(false),
-    //     }
-    // }
-
     #[test]
     fn can_broadcast() {
         let (rx0, _, client0) = mock_client("client0", 1);
         let (rx1, _, client1) = mock_client("client1", 1);
-        let mut room = Room::new(vec![client0, client1]);
+        let room = Room::new(vec![client0, client1]);
 
         room.broadcast(TinyMsg::A).wait().unwrap();
         assert_eq!(rx0.into_future().wait().unwrap().0, Some(TinyMsg::A));
         assert_eq!(rx1.into_future().wait().unwrap().0, Some(TinyMsg::A));
+    }
+
+    #[test]
+    fn can_transmit() {
+        let (rx0, _, client0) = mock_client("client0", 1);
+        let (rx1, _, client1) = mock_client("client1", 1);
+
+        let mut msgs = HashMap::new();
+        msgs.insert(client0.id(), TinyMsg::A);
+        msgs.insert(client1.id(), TinyMsg::B("entropy".to_string()));
+
+        let room = Room::new(vec![client0, client1]);
+        room.transmit(msgs).wait().unwrap();
+
+        assert_eq!(rx0.into_future().wait().unwrap().0, Some(TinyMsg::A));
+        assert_eq!(rx1.into_future().wait().unwrap().0,
+                   Some(TinyMsg::B("entropy".to_string())));
     }
 }
