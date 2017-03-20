@@ -2,10 +2,10 @@ extern crate futures;
 extern crate tokio_timer;
 
 mod client;
-//mod room;
+mod room;
 
 pub use self::client::*;
-//pub use self::room::*;
+pub use self::room::*;
 
 use std::time::Duration;
 

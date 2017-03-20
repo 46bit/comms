@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::marker::PhantomData;
 use futures::{future, Future, Sink, Stream, Poll, Async};
 use tokio_timer;
@@ -48,9 +49,11 @@ impl<I, T, R> Client<I, T, R>
         }
     }
 
-    // pub fn join(self, room: &mut Room<I, T, R>) -> bool {
-    //     room.insert(self)
-    // }
+    pub fn join(self, room: &mut Room<I, T, R>) -> bool
+        where I: PartialEq + Eq + Hash
+    {
+        room.insert(self)
+    }
 
     pub fn transmit(self, msg: T::SinkItem) -> Box<Future<Item = Self, Error = Self>> {
         // Lack of debug and partialeq requirement on error items requires this code.
@@ -196,32 +199,32 @@ mod tests {
     use super::test::*;
     use futures::{Future, Stream, executor};
 
-    // #[test]
-    // fn can_join_room() {
-    //     let (_, client0) = mock_client_channelled();
-    //     let (_, client1) = mock_client_channelled();
+    #[test]
+    fn can_join_room() {
+        let (_, client0) = mock_client_channelled();
+        let (_, client1) = mock_client_channelled();
 
-    //     // Adding of a `Client` to a `Room` returns `true`.
-    //     let mut room = Room::default();
-    //     assert_eq!(room.client_ids().len(), 0);
-    //     assert!(client0.clone().join(&mut room));
-    //     assert_eq!(room.client_ids(), vec![client0.id]);
+        // Adding of a `Client` to a `Room` returns `true`.
+        let mut room = Room::default();
+        assert_eq!(room.client_ids().len(), 0);
+        assert!(client0.clone().join(&mut room));
+        assert_eq!(room.client_ids(), vec![client0.id]);
 
-    //     // Adding a `Client` whose ID was already present returns `false` and doesn't
-    //     // add a duplicate.
-    //     let client0_id = client0.id;
-    //     assert!(!client0.join(&mut room));
-    //     assert_eq!(room.client_ids(), vec![client0_id]);
+        // Adding a `Client` whose ID was already present returns `false` and doesn't
+        // add a duplicate.
+        let client0_id = client0.id;
+        assert!(!client0.join(&mut room));
+        assert_eq!(room.client_ids(), vec![client0_id]);
 
-    //     // Adding a different-IDed `Client` to a `Room` works.
-    //     let client1_id = client1.id;
-    //     assert!(client1.join(&mut room));
-    //     // Extended comparison necessary because ordering not preserved.
-    //     let client_ids = room.client_ids();
-    //     assert!(client_ids.len() == 2);
-    //     assert!(client_ids.contains(&client0_id));
-    //     assert!(client_ids.contains(&client1_id));
-    // }
+        // Adding a different-IDed `Client` to a `Room` works.
+        let client1_id = client1.id;
+        assert!(client1.join(&mut room));
+        // Extended comparison necessary because ordering not preserved.
+        let client_ids = room.client_ids();
+        assert!(client_ids.len() == 2);
+        assert!(client_ids.contains(&client0_id));
+        assert!(client_ids.contains(&client1_id));
+    }
 
     #[test]
     fn can_transmit() {
