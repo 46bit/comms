@@ -118,6 +118,32 @@ impl<I, T, R> Room<I, T, R>
         }))
     }
 
+    pub fn receive(mut self,
+                   timeout: ClientTimeout<'static>)
+                   -> Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>> {
+        let futures = self.ready_clients
+            .drain()
+            .map(|(id, client)| client.receive(timeout).then(|v| future::ok((id, v))))
+            .collect::<Vec<_>>();
+        Box::new(future::join_all(futures).map(|results| {
+            let mut msgs = HashMap::new();
+            for (id, result) in results {
+                match result {
+                    Ok((maybe_msg, ready_client)) => {
+                        if let Some(msg) = maybe_msg {
+                            msgs.insert(id.clone(), msg);
+                        }
+                        self.ready_clients.insert(id, ready_client);
+                    }
+                    Err(gone_client) => {
+                        self.gone_clients.insert(id, gone_client);
+                    }
+                }
+            }
+            (msgs, self)
+        }))
+    }
+
     // @TODO: When client has a method to check its status against the internal rx/tx,
     // update this to use it (or make a new method to.)
     pub fn statuses(&self) -> HashMap<I, ClientStatus<T::SinkError, R::Error>> {
@@ -144,7 +170,7 @@ impl<I, T, R> Default for Room<I, T, R>
 mod tests {
     use super::*;
     use super::test::*;
-    use futures::Stream;
+    use futures::{executor, Future, Stream};
 
     #[test]
     fn can_broadcast() {
@@ -172,6 +198,37 @@ mod tests {
         assert_eq!(rx0.into_future().wait().unwrap().0, Some(TinyMsg::A));
         assert_eq!(rx1.into_future().wait().unwrap().0,
                    Some(TinyMsg::B("entropy".to_string())));
+    }
+
+    #[test]
+    fn can_receive() {
+        let (_, tx0, client0) = mock_client("client0", 1);
+        let (_, tx1, client1) = mock_client("client1", 1);
+        let (id0, id1) = (client0.id(), client1.id());
+        let room = Room::new(vec![client0, client1]);
+
+        let timeout = ClientTimeout::None;
+        let mut future = executor::spawn(room.receive(timeout).fuse());
+        assert!(future.poll_future(unpark_noop()).unwrap().is_not_ready());
+
+        tx0.send(TinyMsg::A).wait().unwrap();
+        tx1.send(TinyMsg::B("abc".to_string())).wait().unwrap();
+
+        let mut exp_msgs = HashMap::new();
+        exp_msgs.insert(id0.clone(), TinyMsg::A);
+        exp_msgs.insert(id1.clone(), TinyMsg::B("abc".to_string()));
+
+        match future.wait_future() {
+            Ok((msgs, room)) => {
+                assert_eq!(msgs, exp_msgs);
+                assert_eq!(room.statuses()
+                               .into_iter()
+                               .map(|(id, status)| (id, status.ready()))
+                               .collect::<HashMap<_, _>>(),
+                           vec![(id0, true), (id1, true)].into_iter().collect());
+            }
+            _ => assert!(false),
+        }
     }
 
     #[test]

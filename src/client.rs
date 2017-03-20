@@ -197,7 +197,7 @@ impl<'a, T, R> Future for Receive<'a, T, R>
 mod tests {
     use super::*;
     use super::test::*;
-    use futures::{Future, Stream, executor};
+    use futures::{executor, Future, Stream};
 
     #[test]
     fn can_join_room() {
@@ -259,7 +259,10 @@ mod tests {
 
             let mut future = executor::spawn(receive.fuse());
 
-            //assert!(future.poll_future(unpark_noop()) == Ok(AsyncSink::NotReady));
+            if let Ok(Async::NotReady) = future.poll_future(unpark_noop()) {
+            } else {
+                assert!(false);
+            }
 
             tx_to_client = tx_to_client.send(msg.clone()).wait().unwrap();
 
