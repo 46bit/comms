@@ -27,6 +27,27 @@ pub enum ClientStatus<'a, T, R>
     Gone(&'a ClientError<T, R>),
 }
 
+impl<'a, T, R> ClientStatus<'a, T, R>
+    where T: 'a,
+          R: 'a
+{
+    pub fn ready(&self) -> bool {
+        if let ClientStatus::Ready = *self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn gone(&self) -> Option<&'a ClientError<T, R>> {
+        if let ClientStatus::Gone(e) = *self {
+            Some(e)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum ClientTimeout<'a> {
     None,

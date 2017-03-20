@@ -4,6 +4,7 @@ use futures::{future, sink, stream, Future, Sink, Stream, Poll, Async, AsyncSink
 use tokio_timer;
 use super::*;
 
+#[derive(Debug)]
 pub struct Client<I, T, R>
     where I: Clone + Send + Debug + 'static,
           T: Sink + Debug + 'static,
@@ -11,6 +12,15 @@ pub struct Client<I, T, R>
 {
     id: I,
     inner: Result<ClientInner<T, R>, ClientError<T::SinkError, R::Error>>,
+}
+
+#[derive(Debug)]
+struct ClientInner<T, R>
+    where T: Sink + Debug + 'static,
+          R: Stream + Debug + 'static
+{
+    tx: T,
+    rx: R,
 }
 
 impl<I, T, R> Client<I, T, R>
@@ -112,47 +122,15 @@ impl<I, T, R> Client<I, T, R>
         }
     }
 
-    // // @TODO: Implement `into_inner` yielding a `(T, R)` tuple?
     pub fn close(&mut self) {
-        // Drop inner tx and rx, if present.
+        // N.B., Erases any existing error. This seems the least-odd thing to do.
         self.inner = Err(ClientError::Closed);
     }
 
-    pub fn into_inner(self) -> (I, Option<(T, R)>) {
-        (self.id, self.inner.ok().map(|inner| (inner.tx, inner.rx)))
+    pub fn into_inner(self) -> (I, Result<(T, R), ClientError<T::SinkError, R::Error>>) {
+        (self.id, self.inner.map(|inner| (inner.tx, inner.rx)))
     }
 }
-
-struct ClientInner<T, R>
-    where T: Sink + Debug + 'static,
-          R: Stream + Debug + 'static
-{
-    tx: T,
-    rx: R,
-}
-
-// impl<I, T, R> Sink for Client<I, T, R>
-//     where I: Clone + Send + Debug + 'static,
-//           T: Sink + 'static,
-//           R: Stream + 'static
-// {
-//     type SinkItem = T::SinkItem;
-//     type SinkError = T::SinkError;
-
-//     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-//         match self.inner.as_mut().map(|inner| &mut inner.tx) {
-//             Some(mut tx) => tx.start_send(item),
-//             None => Ok(AsyncSink::NotReady(item)),
-//         }
-//     }
-
-//     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-//         match self.inner.as_mut().map(|inner| &mut inner.tx) {
-//             Some(mut tx) => tx.poll_complete(),
-//             None => Ok(Async::Ready(())),
-//         }
-//     }
-// }
 
 struct Receive<'a, T, R>
     where T: Sink + Debug + 'static,
@@ -240,7 +218,7 @@ mod tests {
 
         for _ in 0..10 {
             let msg = TinyMsg::A;
-            client.transmit(msg.clone()).wait().unwrap();
+            client = client.transmit(msg.clone()).wait().unwrap();
 
             match rx_stream.next() {
                 Some(Ok(msg2)) => {
@@ -277,22 +255,22 @@ mod tests {
     }
 
     #[test]
-    fn can_status_sync() {
+    fn can_status() {
         let msg = TinyMsg::B("ABC".to_string());
 
         let (mut rx_from_client, _, client) = mock_client("client1", 1);
-        assert_eq!(client.status_sync(), ClientStatus::Ready);
+        assert!(client.status().ready());
         let _ = rx_from_client.close();
-        assert_eq!(client.status_sync(), ClientStatus::Ready);
+        assert!(client.status().ready());
 
         let (_, mut tx_to_client, client) = mock_client("client2", 1);
-        assert_eq!(client.status_sync(), ClientStatus::Ready);
+        assert!(client.status().ready());
         let _ = tx_to_client.close();
-        assert_eq!(client.status_sync(), ClientStatus::Ready);
+        assert!(client.status().ready());
 
         let (_, _, client) = mock_client("client2", 1);
-        assert_eq!(client.status_sync(), ClientStatus::Ready);
-        assert!(client.send(msg.clone()).wait().is_err());
+        assert!(client.status().ready());
+        assert!(client.transmit(msg.clone()).wait().is_err());
         //assert_eq!(client.status_sync(), ClientStatus::Gone);
     }
 
