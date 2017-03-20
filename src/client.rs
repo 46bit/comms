@@ -1,22 +1,8 @@
 use std::fmt::Debug;
-use futures::{sink, stream, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
+use std::marker::PhantomData;
+use futures::{future, sink, stream, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use tokio_timer;
 use super::*;
-
-enum TimeoutError<S>
-    where S: Stream
-{
-    TimeoutError(tokio_timer::TimeoutError<S>),
-    StreamError(S::Error),
-}
-
-impl<S> From<tokio_timer::TimeoutError<S>> for TimeoutError<S>
-    where S: Stream
-{
-    fn from(e: tokio_timer::TimeoutError<S>) -> TimeoutError<S> {
-        TimeoutError::TimeoutError(e)
-    }
-}
 
 pub struct Client<I, T, R>
     where I: Clone + Send + Debug + 'static,
@@ -24,16 +10,7 @@ pub struct Client<I, T, R>
           R: Stream + Debug + 'static
 {
     id: I,
-    inner: Result<ClientInner<T, R>, ClientError<T, R>>,
-}
-
-struct ClientInner<T, R>
-    where T: Sink + Debug + 'static,
-          R: Stream + Debug + 'static
-{
-    tx: T,
-    rx: R,
-    timer: tokio_timer::Timer,
+    inner: Result<ClientInner<T, R>, ClientError<T::SinkError, R::Error>>,
 }
 
 impl<I, T, R> Client<I, T, R>
@@ -41,14 +18,10 @@ impl<I, T, R> Client<I, T, R>
           T: Sink + Debug + 'static,
           R: Stream + Debug + 'static
 {
-    pub fn new(id: I, tx: T, rx: R, timer: tokio_timer::Timer) -> Client<I, T, R> {
+    pub fn new(id: I, tx: T, rx: R) -> Client<I, T, R> {
         Client {
             id: id,
-            inner: Ok(ClientInner {
-                tx: tx,
-                rx: rx,
-                timer: timer,
-            }),
+            inner: Ok(ClientInner { tx: tx, rx: rx }),
         }
     }
 
@@ -69,19 +42,30 @@ impl<I, T, R> Client<I, T, R>
     //     room.insert(self)
     // }
 
-    // pub fn transmit(self, msg: T::SinkItem) -> sink::Send<Self> {
-    //     self.send(msg).then(|result| match result {
-    //         Ok(client) => future::ok(Ok(client)),
-    //         Err(e) => future::ok()
-    //     })
-    // }
+    pub fn transmit(self, msg: T::SinkItem) -> Box<Future<Item = Self, Error = Self>> {
+        // Lack of debug and partialeq requirement on error items requires this code.
+        if let Ok(inner) = self.inner {
+            let id = self.id;
+            let id2 = id.clone();
+            let rx = inner.rx;
+            Box::new(inner.tx
+                .send(msg)
+                .map(|tx| Client::new(id, tx, rx))
+                .map_err(|e| {
+                    Client {
+                        id: id2,
+                        inner: Err(ClientError::Sink(e)),
+                    }
+                }))
+        } else {
+            Box::new(future::err(self))
+        }
+    }
 
     // We\re mapping everything to Ok.
     // But if no message is provided, ClientTimeout::DisconnectAfter will be Ok but closed.
     // Deliberate aim: no more abstraction; if anything the crate will remove abstraction.
-
     // Or we map to Ok if the client is still connected. Yes, this.
-
     // if msg received
     //     Ok((Some(msg), client))
     // elsif ClientTimeout::None
@@ -92,74 +76,59 @@ impl<I, T, R> Client<I, T, R>
     //     Ok((None, client))
     // else
     //     unreachable!()
-
-
-
-    pub fn receive
-        (self,
-         timeout: ClientTimeout)
-         -> Box<Future<Item = (Option<R::Item>, Client<I, T, R>), Error = Client<I, T, R>>> {
-        let mut rx = Box::new(self.inner.as_mut().unwrap().rx.map_err(TimeoutError::StreamError));
-        if let Some(timeout_duration) = timeout.duration() {
-            rx = Box::new(self.inner
-                .as_mut().unwrap()
-                .timer
-                .timeout_stream(rx, timeout_duration)
-                .map(|(maybe_msg, rx_or_timeout)| (maybe_msg, rx_or_timeout.into_inner())));
-        }
-
-        rx.then(|result| match result {
-            Ok((maybe_msg, rx)) => {
-                self.inner.as_mut().unwrap().rx = rx;
-                Ok((maybe_msg, self))
-            }
-            // If the stream errors, we discard the client.
-            // For relative simplicity, if the timer errors, we discard the client.
-            // In time it would be best to reduce clients to just IDs if they fail.
-            Err(e) => {
-                match e {
-                    TimeoutError::TimeoutError(tokio_timer::TimeoutError::Timer(_, e)) => {
-                        self.inner = Err(ClientError::Timer(e));
-                        Err(self)
-                    }
-                    TimeoutError::TimeoutError(TimeoutError::TimedOut(rx)) => {
-                        if timeout == ClientTimeout::DisconnectAfter(..) {
-                            self.inner = Err(ClientError::Timeout);
-                            Err(self)
-                        } else {
-                            self.inner.as_mut().unwrap.rx = rx;
-                            Ok((None, self))
-                        }
-                    }
-                    TimeoutError::StreamError(e) => {
-                        self.inner = Err(ClientError::StreamError(e));
-                        Err(self)
-                    }
+    pub fn receive<'a>(self,
+                       timeout: ClientTimeout<'static>)
+                       -> Box<Future<Item = (Option<R::Item>, Self), Error = Self>> {
+        // Lack of debug and partialeq requirement on error items requires this code.
+        if let Ok(inner) = self.inner {
+            let id = self.id;
+            let id2 = id.clone();
+            let tx = inner.tx;
+            let sleep = timeout.duration_timer()
+                .map(|(duration, timer)| timer.sleep(duration));
+            Box::new(Receive::<'static, T, R> {
+                    timeout: timeout,
+                    sleep: sleep,
+                    rx: Some(inner.rx),
+                    ph: PhantomData,
                 }
-            }
-        })
+                .map(move |(maybe_msg, rx)| (maybe_msg, Self::new(id, tx, rx)))
+                .map_err(move |e| {
+                    Client {
+                        id: id2,
+                        inner: Err(e),
+                    }
+                }))
+        } else {
+            Box::new(future::err(self))
+        }
     }
 
-    // -> Box<Future<Item = Client, Error = Client>>
-    // pub enum ClientTimeout {
-    //     None,                       -> Error=
-    //     KeepAliveAfter(Duration),   -> Error=ClientWithInner
-    //     DisconnectAfter(Duration),  -> Error=ClientWithoutInner
-    // }
-
-    // pub fn status_sync(&self) -> ClientStatus {
-    //     if self.inner.is_some() {
-    //         ClientStatus::Ready
-    //     } else {
-    //         ClientStatus::Gone
-    //     }
-    // }
+    pub fn status<'a>(&'a self) -> ClientStatus<'a, T::SinkError, R::Error> {
+        if let Err(ref e) = self.inner {
+            ClientStatus::Gone(&e)
+        } else {
+            ClientStatus::Ready
+        }
+    }
 
     // // @TODO: Implement `into_inner` yielding a `(T, R)` tuple?
-    // pub fn close(&mut self) {
-    //     // Drop inner tx and rx, if present.
-    //     self.inner.take();
-    // }
+    pub fn close(&mut self) {
+        // Drop inner tx and rx, if present.
+        self.inner = Err(ClientError::Closed);
+    }
+
+    pub fn into_inner(self) -> (I, Option<(T, R)>) {
+        (self.id, self.inner.ok().map(|inner| (inner.tx, inner.rx)))
+    }
+}
+
+struct ClientInner<T, R>
+    where T: Sink + Debug + 'static,
+          R: Stream + Debug + 'static
+{
+    tx: T,
+    rx: R,
 }
 
 // impl<I, T, R> Sink for Client<I, T, R>
@@ -185,21 +154,51 @@ impl<I, T, R> Client<I, T, R>
 //     }
 // }
 
-// impl<I, T, R> Stream for Client<I, T, R>
-//     where I: Clone + Send + Debug + 'static,
-//           T: Sink + 'static,
-//           R: Stream + 'static
-// {
-//     type Item = R::Item;
-//     type Error = R::Error;
+struct Receive<'a, T, R>
+    where T: Sink + Debug + 'static,
+          R: Stream + Debug + 'static
+{
+    timeout: ClientTimeout<'a>,
+    sleep: Option<tokio_timer::Sleep>,
+    rx: Option<R>,
+    ph: PhantomData<T>,
+}
 
-//     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-//         match self.inner.as_mut().map(|inner| &mut inner.rx) {
-//             Some(mut rx) => rx.poll(),
-//             None => Ok(Async::Ready(None)),
-//         }
-//     }
-// }
+impl<'a, T, R> Future for Receive<'a, T, R>
+    where T: Sink + Debug + 'static,
+          R: Stream + Debug + 'static
+{
+    type Item = (Option<R::Item>, R);
+    type Error = ClientError<T::SinkError, R::Error>;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        // First, try polling the future
+        let polled = self.rx.as_mut().unwrap().poll();
+        match polled {
+            Ok(Async::NotReady) => {}
+            Ok(Async::Ready(maybe_item)) => {
+                return Ok(Async::Ready((maybe_item, self.rx.take().unwrap())));
+            }
+            Err(e) => return Err(ClientError::Stream(e)),
+        }
+
+        // Now check the timer
+        if let Some(sleep) = self.sleep.as_mut() {
+            match sleep.poll() {
+                Ok(Async::NotReady) => Ok(Async::NotReady),
+                Ok(Async::Ready(_)) => {
+                    match self.timeout {
+                        ClientTimeout::DisconnectAfter(..) => Err(ClientError::Timeout),
+                        _ => Ok(Async::Ready((None, self.rx.take().unwrap()))),
+                    }
+                }
+                Err(e) => Err(ClientError::Timer(e)),
+            }
+        } else {
+            Ok(Async::NotReady)
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

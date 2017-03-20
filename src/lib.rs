@@ -14,43 +14,50 @@ pub enum ClientError<T, R> {
     Closed,
     Timeout,
     Timer(tokio_timer::TimerError),
-    SinkError(T),
-    StreamError(R),
+    Sink(T),
+    Stream(R),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum ClientStatus<T, R> {
+pub enum ClientStatus<'a, T, R>
+    where T: 'a,
+          R: 'a
+{
     Ready,
-    Gone(ClientError<T, R>),
+    Gone(&'a ClientError<T, R>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ClientTimeout {
+#[derive(Clone, Copy)]
+pub enum ClientTimeout<'a> {
     None,
-    KeepAliveAfter(Duration),
-    DisconnectAfter(Duration),
+    KeepAliveAfter(Duration, &'a tokio_timer::Timer),
+    DisconnectAfter(Duration, &'a tokio_timer::Timer),
 }
 
-impl ClientTimeout {
-    pub fn keep_alive_after(maybe_duration: Option<Duration>) -> ClientTimeout {
+impl<'a> ClientTimeout<'a> {
+    pub fn keep_alive_after(maybe_duration: Option<Duration>,
+                            timer: &'a tokio_timer::Timer)
+                            -> ClientTimeout {
         match maybe_duration {
-            Some(duration) => ClientTimeout::KeepAliveAfter(duration),
+            Some(duration) => ClientTimeout::KeepAliveAfter(duration, timer),
             None => ClientTimeout::None,
         }
     }
 
-    pub fn disconnect_after(maybe_duration: Option<Duration>) -> ClientTimeout {
+    pub fn disconnect_after(maybe_duration: Option<Duration>,
+                            timer: &'a tokio_timer::Timer)
+                            -> ClientTimeout {
         match maybe_duration {
-            Some(duration) => ClientTimeout::DisconnectAfter(duration),
+            Some(duration) => ClientTimeout::DisconnectAfter(duration, timer),
             None => ClientTimeout::None,
         }
     }
 
-    pub fn duration(&self) -> Option<Duration> {
+    pub fn duration_timer(&self) -> Option<(Duration, &tokio_timer::Timer)> {
         match *self {
             ClientTimeout::None => None,
-            ClientTimeout::KeepAliveAfter(d) => Some(d),
-            ClientTimeout::DisconnectAfter(d) => Some(d),
+            ClientTimeout::KeepAliveAfter(d, t) => Some((d, t)),
+            ClientTimeout::DisconnectAfter(d, t) => Some((d, t)),
         }
     }
 }
