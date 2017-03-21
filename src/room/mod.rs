@@ -1,7 +1,15 @@
+mod transmit;
+mod broadcast;
+mod receive;
+
+pub use self::transmit::*;
+pub use self::broadcast::*;
+pub use self::transmit::*;
+pub use self::receive::*;
+
 use std::hash::Hash;
 use std::collections::{HashMap, HashSet};
-use futures::{future, sink, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
-
+use futures::{Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use super::*;
 
 pub struct Room<I, T, R>
@@ -11,7 +19,7 @@ pub struct Room<I, T, R>
           T::SinkError: Clone,
           R::Error: Clone
 {
-    timeout: ClientTimeout,
+    timeout: Timeout,
     ready_clients: HashMap<I, Client<I, T, R>>,
     gone_clients: HashMap<I, Client<I, T, R>>,
     // Data for Sink
@@ -37,11 +45,11 @@ impl<I, T, R> Room<I, T, R>
         room
     }
 
-    pub fn timeout(&self) -> &ClientTimeout {
+    pub fn timeout(&self) -> &Timeout {
         &self.timeout
     }
 
-    pub fn set_timeout(&mut self, timeout: ClientTimeout) {
+    pub fn set_timeout(&mut self, timeout: Timeout) {
         for client in self.ready_clients.values_mut() {
             client.set_timeout(timeout.clone());
         }
@@ -58,6 +66,11 @@ impl<I, T, R> Room<I, T, R>
 
     pub fn gone_ids(&self) -> HashSet<I> {
         self.gone_clients.keys().cloned().collect()
+    }
+
+    #[doc(hidden)]
+    pub fn ready_client_mut(&mut self, id: &I) -> Option<&mut Client<I, T, R>> {
+        self.ready_clients.get_mut(id)
     }
 
     // @TODO: Exists only for `Client::join`. When RFC1422 is stable, make this `pub(super)`.
@@ -94,40 +107,28 @@ impl<I, T, R> Room<I, T, R>
     //     }
     // }
 
-    pub fn broadcast(self, msg: T::SinkItem) -> sink::Send<Self>
+    pub fn broadcast(self, msg: T::SinkItem) -> Broadcast<I, T, R>
         where T::SinkItem: Clone
     {
-        // @TODO: Lots of unnecessary allocations, but the alternative is a lot of code.
-        let msgs = self.ready_clients.keys().cloned().map(|id| (id, msg.clone())).collect();
-        self.send(msgs)
+        Broadcast::new(self, msg)
     }
 
-    pub fn transmit(self, msgs: HashMap<I, T::SinkItem>) -> sink::Send<Self> {
-        self.send(msgs)
+    pub fn transmit(self, msgs: HashMap<I, T::SinkItem>) -> Transmit<I, T, R> {
+        Transmit::new(self, msgs.into_iter().collect())
     }
 
-    pub fn receive(self) -> Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>> {
-        Box::new(self.into_future()
-            .then(|result| match result {
-                Ok((Some(msgs), client)) => future::ok((msgs, client)),
-                Ok((None, client)) => future::ok((HashMap::new(), client)),
-                Err(_) => unreachable!()
-            }))
+    pub fn receive_all(self) -> Receive<I, T, R> {
+        let ids = self.ready_clients.keys().cloned().collect();
+        Receive::new(self, ids)
     }
 
-    pub fn receive_from(mut self,
-                        ids: Vec<I>)
-                        -> Option<Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>>> {
-        if !self.poll_list.is_empty() || !self.poll_replies.is_empty() {
-            return None;
-        }
-        self.poll_list = ids;
-        Some(self.receive())
+    pub fn receive(self, ids: HashSet<I>) -> Receive<I, T, R> {
+        Receive::new(self, ids.into_iter().collect())
     }
 
     // @TODO: When client has a method to check its status against the internal rx/tx,
     // update this to use it (or make a new method to.)
-    pub fn statuses(&self) -> HashMap<I, ClientStatus<T::SinkError, R::Error>> {
+    pub fn statuses(&self) -> HashMap<I, Status<T::SinkError, R::Error>> {
         let rs = self.ready_clients.iter().map(|(id, client)| (id.clone(), client.status()));
         let gs = self.gone_clients.iter().map(|(id, client)| (id.clone(), client.status()));
         rs.chain(gs).collect()
@@ -154,7 +155,7 @@ impl<I, T, R> Default for Room<I, T, R>
 {
     fn default() -> Room<I, T, R> {
         Room {
-            timeout: ClientTimeout::None,
+            timeout: Timeout::None,
             ready_clients: HashMap::new(),
             gone_clients: HashMap::new(),
             start_send_list: vec![],
@@ -329,13 +330,13 @@ mod tests {
     }
 
     #[test]
-    fn can_receive() {
+    fn can_receive_all() {
         let (_, tx0, client0) = mock_client("client0", 1);
         let (_, tx1, client1) = mock_client("client1", 1);
         let (id0, id1) = (client0.id(), client1.id());
         let room = Room::new(vec![client0, client1]);
 
-        let mut future = executor::spawn(room.receive().fuse());
+        let mut future = executor::spawn(room.receive_all().fuse());
         assert!(future.poll_future(unpark_noop()).unwrap().is_not_ready());
 
         tx0.send(TinyMsg::A).wait().unwrap();
