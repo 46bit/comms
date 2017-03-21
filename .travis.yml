@@ -1,5 +1,6 @@
 sudo: false
 language: rust
+cache: cargo
 rust:
 - nightly-2017-03-16
 - beta
@@ -22,7 +23,7 @@ addons:
     - libdw-dev
     - binutils-dev
 after_success:
-- travis-cargo --only stable doc-upload
+- travis-cargo doc-upload --branch master
 - travis-cargo coveralls --no-sudo
 notifications:
   email:
