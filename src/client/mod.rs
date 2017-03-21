@@ -4,6 +4,9 @@ use futures::{future, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use tokio_timer;
 use super::*;
 
+// @TODO: When breaking `Client` into separate futures, try defining:
+// type Connection = Result<Connection, Disconnection>;
+// N.B., Would need a better name for the type.
 struct ClientInner<T, R>
     where T: Sink + 'static,
           R: Stream + 'static
@@ -23,6 +26,15 @@ impl<T, R> Debug for ClientInner<T, R>
     }
 }
 
+/// Handles communication with a single server client.
+///
+/// This is the basic 'unit' around which `comms` is constructed. It handles
+/// communication with a single client, e.g., a single TCP socket. It stores
+/// an ID and closes the connection if the provided `Sink` or `Stream` errors.
+///
+/// In addition this supports timeouts on receiving data. The `Timeout` enum
+/// allows specifying whether to have a timeout and whether the client should
+/// be disconnected should the timeout not be met.
 #[derive(Debug)]
 pub struct Client<I, T, R>
     where I: Clone + Send + 'static,
@@ -33,7 +45,7 @@ pub struct Client<I, T, R>
 {
     id: I,
     timeout: Timeout,
-    inner: Result<ClientInner<T, R>, Error<T::SinkError, R::Error>>,
+    inner: Result<ClientInner<T, R>, Disconnect<T::SinkError, R::Error>>,
 }
 
 impl<I, T, R> Client<I, T, R>
@@ -43,6 +55,9 @@ impl<I, T, R> Client<I, T, R>
           T::SinkError: Clone,
           R::Error: Clone
 {
+    /// Create a new client.
+    ///
+    /// Created from the ID, a timeout strategy, a `Sink` and a `Stream`.
     pub fn new(id: I, timeout: Timeout, tx: T, rx: R) -> Client<I, T, R> {
         Client {
             id: id,
@@ -55,10 +70,12 @@ impl<I, T, R> Client<I, T, R>
         }
     }
 
+    /// Get a clone of the client ID.
     pub fn id(&self) -> I {
         self.id.clone()
     }
 
+    /// Change the client's ID. The new ID can be of a different type.
     pub fn rename<J>(self, new_id: J) -> Client<J, T, R>
         where J: Clone + Send + 'static
     {
@@ -69,20 +86,38 @@ impl<I, T, R> Client<I, T, R>
         }
     }
 
+    /// Get the current timeout strategy in use.
     pub fn timeout(&self) -> &Timeout {
         &self.timeout
     }
 
+    /// Change the timeout strategy in use.
     pub fn set_timeout(&mut self, timeout: Timeout) {
         self.timeout = timeout;
     }
 
+    /// Join a `Room` of clients with the same type.
     pub fn join(self, room: &mut Room<I, T, R>) -> bool
         where I: PartialEq + Eq + Hash
     {
         room.insert(self)
     }
 
+    /// Future that transmits a single message.
+    ///
+    /// If this succeeds the Item is a Client. If the transmission fails the Error is a
+    /// Client which has dropped its connection.
+    ///
+    /// ```rust,ignore
+    /// # This is extremely inefficient
+    /// handle.spawn(client.transmit('h')
+    ///     .and_then(|client| client.transmit('e'))
+    ///     .and_then(|client| client.transmit('l'))
+    ///     .and_then(|client| client.transmit('l'))
+    ///     .and_then(|client| client.transmit('o'))
+    ///     .map(|client| println!("sent hello to {}.", client.id()); ())
+    ///     .map_err(|client| println!("sending hello to {} failed.", client.id()); ()));
+    /// ```
     pub fn transmit(self, msg: T::SinkItem) -> Box<Future<Item = Self, Error = Self>> {
         // N.B. This does ensure the inner is set, but it's a bit of a hack.
         let id = self.id();
@@ -96,20 +131,14 @@ impl<I, T, R> Client<I, T, R>
         }))
     }
 
-    // We\re mapping everything to Ok.
-    // But if no message is provided, Timeout::DisconnectAfter will be Ok but closed.
-    // Deliberate aim: no more abstraction; if anything the crate will remove abstraction.
-    // Or we map to Ok if the client is still connected. Yes, this.
-    // if msg received
-    //     Ok((Some(msg), client))
-    // elsif Timeout::None
-    //     does not terminate
-    // elsif Timeout::DisconnectAfter
-    //     Err(client_without_inner)
-    // elsif Timeout::KeepAliveAfter
-    //     Ok((None, client))
-    // else
-    //     unreachable!()
+    /// Future that tries to receive a single message.
+    ///
+    /// If the Client is disconnected (whether because the connection dropped or because
+    /// of the current timeout strategy) the Error value is a Client.
+    ///
+    /// If the Client is not disconnected, the Item value is a tuple `(Option<msg>, Client)`.
+    /// The message option will only be `None` if the timeout was reached but its strategy
+    /// specified keeping the Client connected.
     pub fn receive(self) -> Box<Future<Item = (Option<R::Item>, Self), Error = Self>> {
         Box::new(self.into_future()
             .then(|result| match result {
@@ -119,6 +148,12 @@ impl<I, T, R> Client<I, T, R>
             }))
     }
 
+    /// Get the current status of this Client.
+    ///
+    /// Check whether a Client is connected with `client.status().is_ready()`.
+    ///
+    /// If disconnected you can get the cause of disconnection with
+    /// `client.status().is_gone().unwrap()`.
     pub fn status(&self) -> Status<T::SinkError, R::Error> {
         if let Err(ref e) = self.inner {
             Status::Gone(e.clone())
@@ -139,12 +174,19 @@ impl<I, T, R> Client<I, T, R>
         unimplemented!();
     }
 
-    // N.B., Erases any existing error. This seems the least-odd thing to do.
-    pub fn close(&mut self) {
-        self.inner = Err(Error::Closed);
+    /// Force the Client to disconnect if a connection is active.
+    ///
+    /// Returns whether an active connection was disconnected.
+    pub fn close(&mut self) -> bool {
+        if self.inner.is_ok() {
+            self.inner = Err(Disconnect::Closed);
+            return true;
+        }
+        false
     }
 
-    pub fn into_inner(self) -> (I, Result<(T, R), Error<T::SinkError, R::Error>>) {
+    /// Retrieve the client ID and the current state of the connection.
+    pub fn into_inner(self) -> (I, Result<(T, R), Disconnect<T::SinkError, R::Error>>) {
         (self.id, self.inner.map(|inner| (inner.tx, inner.rx)))
     }
 }
@@ -157,7 +199,7 @@ impl<I, T, R> Stream for Client<I, T, R>
           R::Error: Clone
 {
     type Item = Option<R::Item>;
-    type Error = Error<T::SinkError, R::Error>;
+    type Error = Disconnect<T::SinkError, R::Error>;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         let inner_poll = {
@@ -186,17 +228,17 @@ impl<I, T, R> Stream for Client<I, T, R>
                 }
                 return Ok(Async::Ready(Some(Some(item))));
             }
-            // If the stream has terminated, discard it. We record the Closed state for the
+            // If the stream has terminated, discard it. We record the Dropped state for the
             // benefit of Status calls, and pass on the stream termination.
             Ok(Async::Ready(None)) => {
-                self.inner = Err(Error::Closed);
+                self.inner = Err(Disconnect::Dropped);
                 return Ok(Async::Ready(None));
             }
             // If the stream yields an error we discard it. This is a limitation vs the
             // current stream error model but it simplifies an already complex model.
             Err(e) => {
-                self.inner = Err(Error::Stream(e.clone()));
-                return Err(Error::Stream(e));
+                self.inner = Err(Disconnect::Stream(e.clone()));
+                return Err(Disconnect::Stream(e));
             }
         }
 
@@ -222,17 +264,17 @@ impl<I, T, R> Stream for Client<I, T, R>
                     // If keeping alive, merely specify nothing arrived in time.
                     Timeout::KeepAliveAfter(..) => Ok(Async::Ready(Some(None))),
                     // If disconnecting, discard the stream. What to do here is complex.
-                    // Yielding a `Err(Error::Timeout)` is more consistent with
+                    // Yielding a `Err(Disconnect::Timeout)` is more consistent with
                     // matters elsewhere, but the stream model doesn't consider that to
                     // indicate termination. Thus yield for stream termination.
                     Timeout::DisconnectAfter(..) => {
-                        self.inner = Err(Error::Timeout);
+                        self.inner = Err(Disconnect::Timeout);
                         Ok(Async::Ready(None))
                     }
                 }
             }
             // If the timer errored we simply pass that through.
-            Err(e) => Err(Error::Timer(e)),
+            Err(e) => Err(Disconnect::Timer(e)),
         }
     }
 }
@@ -245,12 +287,12 @@ impl<I, T, R> Sink for Client<I, T, R>
           R::Error: Clone
 {
     type SinkItem = T::SinkItem;
-    type SinkError = Error<T::SinkError, R::Error>;
+    type SinkError = Disconnect<T::SinkError, R::Error>;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         let inner_start_send = {
             let inner = match self.inner.as_mut() {
-                Err(_) => return Err(Error::Closed),
+                Err(_) => return Err(Disconnect::Closed),
                 Ok(inner) => inner,
             };
 
@@ -261,8 +303,8 @@ impl<I, T, R> Sink for Client<I, T, R>
             Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
             Ok(AsyncSink::NotReady(item)) => Ok(AsyncSink::NotReady(item)),
             Err(e) => {
-                self.inner = Err(Error::Sink(e.clone()));
-                Err(Error::Sink(e))
+                self.inner = Err(Disconnect::Sink(e.clone()));
+                Err(Disconnect::Sink(e))
             }
         }
     }
@@ -270,7 +312,7 @@ impl<I, T, R> Sink for Client<I, T, R>
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
         let inner_poll_complete = {
             let inner = match self.inner.as_mut() {
-                Err(_) => return Err(Error::Closed),
+                Err(_) => return Err(Disconnect::Closed),
                 Ok(inner) => inner,
             };
 
@@ -281,8 +323,8 @@ impl<I, T, R> Sink for Client<I, T, R>
             Ok(Async::Ready(())) => Ok(Async::Ready(())),
             Ok(Async::NotReady) => Ok(Async::NotReady),
             Err(e) => {
-                self.inner = Err(Error::Sink(e.clone()));
-                Err(Error::Sink(e))
+                self.inner = Err(Disconnect::Sink(e.clone()));
+                Err(Disconnect::Sink(e))
             }
         }
     }
@@ -379,34 +421,34 @@ mod tests {
         let msg = TinyMsg::B("ABC".to_string());
 
         let (mut rx_from_client, _, client) = mock_client("client1", 1);
-        assert!(client.status().ready());
+        assert!(client.status().is_ready());
         // Check unfortunate edgecase that a closed channel is not noticed until the next
         // IO action.
         let _ = rx_from_client.close();
-        assert!(client.status().ready());
+        assert!(client.status().is_ready());
 
         let (_, mut tx_to_client, client) = mock_client("client2", 1);
-        assert!(client.status().ready());
+        assert!(client.status().is_ready());
         let _ = tx_to_client.close();
         // Check unfortunate edgecase that a closed channel is not noticed until the next
         // IO action.
-        assert!(client.status().ready());
+        assert!(client.status().is_ready());
 
         // Assert that status with dropped channels indicates the client is gone.
         let (_, _, client) = mock_client("client2", 1);
-        assert!(client.status().ready());
+        assert!(client.status().is_ready());
         match client.transmit(msg.clone()).wait() {
             Ok(_) => unreachable!(),
-            Err(client) => assert!(client.status().gone().is_some()),
+            Err(client) => assert!(client.status().is_gone().is_some()),
         };
     }
 
     #[test]
     fn can_close() {
         let (_, _, mut client) = mock_client("client1", 1);
-        assert!(client.status().ready());
+        assert!(client.status().is_ready());
         client.close();
-        assert!(client.status().gone().is_some());
+        assert!(client.status().is_gone().is_some());
         // @TODO: Check channels are gone.
     }
 }

@@ -1,7 +1,9 @@
 extern crate futures;
 extern crate tokio_timer;
 
+/// A single client connection.
 pub mod client;
+/// Rooms (groups) of client connections.
 pub mod room;
 
 pub use self::client::Client;
@@ -12,23 +14,35 @@ use std::error;
 use std::fmt::{self, Debug};
 use std::time::Duration;
 
+/// Possible causes for a disconnection.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Error<T, R> {
+pub enum Disconnect<T, R> {
+    /// Closed with `Client::close` or similar.
     Closed,
+    /// The `Sink` or `Stream` dropped.
+    Dropped,
+    /// Closed because of a timeout strategy.
     Timeout,
+    /// Error in a `tokio_timer::Timer` being used for timeout.
     Timer(tokio_timer::TimerError),
+    /// Error in the client's `Sink`.
     Sink(T),
+    /// Error in the client's `Stream`.
     Stream(R),
 }
 
+/// Whether a client is connected or disconnected.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Status<T, R> {
+    /// The Client appears to be connected.
     Ready,
-    Gone(Error<T, R>),
+    /// The client is disconnected (and the `Disconnect` explaining why).
+    Gone(Disconnect<T, R>),
 }
 
 impl<T, R> Status<T, R> {
-    pub fn ready(&self) -> bool {
+    /// Is the client connected?
+    pub fn is_ready(&self) -> bool {
         if let Status::Ready = *self {
             true
         } else {
@@ -36,7 +50,8 @@ impl<T, R> Status<T, R> {
         }
     }
 
-    pub fn gone(&self) -> Option<&Error<T, R>> {
+    /// Is the client disconnected.
+    pub fn is_gone(&self) -> Option<&Disconnect<T, R>> {
         if let Status::Gone(ref e) = *self {
             Some(e)
         } else {
@@ -45,10 +60,14 @@ impl<T, R> Status<T, R> {
     }
 }
 
+/// Strategies for timeouts.
 #[derive(Clone)]
 pub enum Timeout {
+    /// Don't time out.
     None,
+    /// If a client misses the timeout, keep it connected.
     KeepAliveAfter(Duration, tokio_timer::Timer),
+    /// If a client misses the timeout, disconnect it.
     DisconnectAfter(Duration, tokio_timer::Timer),
 }
 
@@ -68,6 +87,11 @@ impl Debug for Timeout {
 }
 
 impl Timeout {
+    /// Construct a new `Timeout` from an `Option<Duration>`, where
+    /// if a client misses the timeout, keep it connected.
+    ///
+    /// `Some(duration)` becomes `Timeout::KeepAliveAfter`.
+    /// `None` becomes `Timeout::None`.
     pub fn keep_alive_after(maybe_duration: Option<Duration>,
                             timer: tokio_timer::Timer)
                             -> Timeout {
@@ -77,6 +101,11 @@ impl Timeout {
         }
     }
 
+    /// Construct a new `Timeout` from an `Option<Duration>`, where
+    /// if a client misses the timeout, disconnect it.
+    ///
+    /// `Some(duration)` becomes `Timeout::DisconnectAfter`.
+    /// `None` becomes `Timeout::None`.
     pub fn disconnect_after(maybe_duration: Option<Duration>,
                             timer: tokio_timer::Timer)
                             -> Timeout {
@@ -86,6 +115,7 @@ impl Timeout {
         }
     }
 
+    #[doc(hidden)]
     pub fn to_sleep(&self) -> Option<tokio_timer::Sleep> {
         match *self {
             Timeout::None => None,

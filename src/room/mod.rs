@@ -12,6 +12,14 @@ use std::collections::{HashMap, HashSet};
 use futures::{Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use super::*;
 
+/// Handles connection with multiple server clients.
+///
+/// It value-adds a lot of consistency by being a well-developed group of clients.
+/// In my applications it's being immensely helpful to factor out this logic to here.
+///
+/// A room has a consistent timeout strategy for all contained clients. When a client
+/// is added the existing timeout strategy is overridden with that of the room. See
+/// `Client` and `Timeout` for more details.
 pub struct Room<I, T, R>
     where I: Clone + Send + PartialEq + Eq + Hash + 'static,
           T: Sink + 'static,
@@ -34,6 +42,9 @@ impl<I, T, R> Room<I, T, R>
           T::SinkError: Clone,
           R::Error: Clone
 {
+    /// Construct a new `Room` from a list of `Client`.
+    ///
+    /// N.B., construct an empty room with `Room::default()`.
     pub fn new(clients: Vec<Client<I, T, R>>) -> Room<I, T, R> {
         let mut room = Room::default();
         for client in clients {
@@ -42,10 +53,12 @@ impl<I, T, R> Room<I, T, R>
         room
     }
 
+    /// Get the current timeout strategy in use by these clients.
     pub fn timeout(&self) -> &Timeout {
         &self.timeout
     }
 
+    /// Change the current timeout strategy in use by these clients.
     pub fn set_timeout(&mut self, timeout: Timeout) {
         for client in self.ready_clients.values_mut() {
             client.set_timeout(timeout.clone());
@@ -53,14 +66,17 @@ impl<I, T, R> Room<I, T, R>
         self.timeout = timeout;
     }
 
+    /// Get the IDs of all the clients.
     pub fn ids(&self) -> HashSet<I> {
         &self.ready_ids() | &self.gone_ids()
     }
 
+    /// Get the IDs of all connected clients.
     pub fn ready_ids(&self) -> HashSet<I> {
         self.ready_clients.keys().cloned().collect()
     }
 
+    /// Get the IDs of all disconnected clients.
     pub fn gone_ids(&self) -> HashSet<I> {
         self.gone_clients.keys().cloned().collect()
     }
@@ -77,7 +93,7 @@ impl<I, T, R> Room<I, T, R>
             return false;
         }
         client.set_timeout(self.timeout.clone());
-        if client.status().ready() {
+        if client.status().is_ready() {
             self.ready_clients.insert(client.id(), client);
         } else {
             self.gone_clients.insert(client.id(), client);
@@ -85,25 +101,17 @@ impl<I, T, R> Room<I, T, R>
         true
     }
 
+    /// Remove a client by ID.
     pub fn remove(&mut self, id: &I) -> Option<Client<I, T, R>> {
         self.ready_clients.remove(id).or_else(|| self.gone_clients.remove(id))
     }
 
+    /// Check is a client ID is present
     pub fn contains(&self, id: &I) -> bool {
         self.ready_clients.contains_key(id) || self.gone_clients.contains_key(id)
     }
 
-    // pub fn filter<F>(&self, ids: Vec<&I>) -> FilteredRoom<I, T, R>
-    //     where F: FnMut(&Client<T, R>) -> bool,
-    //           T: Clone,
-    //           R: Clone
-    // {
-    //     FilteredRoom {
-    //         room_inner: self.inner.clone(),
-    //         client_ids: ids,
-    //     }
-    // }
-
+    /// Broadcast a single message to all connected clients.
     pub fn broadcast_all(self, msg: T::SinkItem) -> Broadcast<I, T, R>
         where T::SinkItem: Clone
     {
@@ -111,33 +119,43 @@ impl<I, T, R> Room<I, T, R>
         Broadcast::new(self, msg, ids)
     }
 
+    /// Broadcast a single message to particular connected clients.
     pub fn broadcast(self, msg: T::SinkItem, ids: HashSet<I>) -> Broadcast<I, T, R>
         where T::SinkItem: Clone
     {
         Broadcast::new(self, msg, ids.into_iter().collect())
     }
 
+    /// Send particular messages to particular connected clients.
     pub fn transmit(self, msgs: HashMap<I, T::SinkItem>) -> Transmit<I, T, R> {
         Transmit::new(self, msgs.into_iter().collect())
     }
 
+    /// Try to receive a single message from all clients.
+    ///
+    /// This obeys the room's timeout strategy.
     pub fn receive_all(self) -> Receive<I, T, R> {
         let ids = self.ready_clients.keys().cloned().collect();
         Receive::new(self, ids)
     }
 
+    /// Try to receive a single message from particular clients.
+    ///
+    /// This obeys the room's timeout strategy.
     pub fn receive(self, ids: HashSet<I>) -> Receive<I, T, R> {
         Receive::new(self, ids.into_iter().collect())
     }
 
     // @TODO: When client has a method to check its status against the internal rx/tx,
     // update this to use it (or make a new method to.)
+    /// Get the status of all the clients.
     pub fn statuses(&self) -> HashMap<I, Status<T::SinkError, R::Error>> {
         let rs = self.ready_clients.iter().map(|(id, client)| (id.clone(), client.status()));
         let gs = self.gone_clients.iter().map(|(id, client)| (id.clone(), client.status()));
         rs.chain(gs).collect()
     }
 
+    /// Force disconnection of particular clients.
     pub fn close(&mut self, ids: HashSet<I>) {
         for id in ids {
             let mut client = match self.ready_clients.remove(&id) {
@@ -149,6 +167,7 @@ impl<I, T, R> Room<I, T, R>
         }
     }
 
+    /// Disconnect all clients.
     pub fn close_all(&mut self) {
         self.ready_clients.clear();
         self.ready_clients.shrink_to_fit();
@@ -322,7 +341,7 @@ mod tests {
                 assert_eq!(msgs, exp_msgs);
                 assert_eq!(room.statuses()
                                .into_iter()
-                               .map(|(id, status)| (id, status.ready()))
+                               .map(|(id, status)| (id, status.is_ready()))
                                .collect::<HashMap<_, _>>(),
                            vec![(id0, true), (id1, true)].into_iter().collect());
             }
@@ -337,7 +356,7 @@ mod tests {
 
         let mut room = Room::new(vec![client0, client1]);
         for (_, status) in room.statuses() {
-            assert!(status.ready());
+            assert!(status.is_ready());
         }
 
         let mut msgs = HashMap::new();
@@ -345,15 +364,15 @@ mod tests {
         room = room.transmit(msgs).wait().unwrap();
         for (id, status) in room.statuses() {
             if id == "client0".to_string() {
-                assert!(status.gone().is_some());
+                assert!(status.is_gone().is_some());
             } else {
-                assert!(status.ready());
+                assert!(status.is_ready());
             }
         }
 
         room = room.broadcast_all(TinyMsg::B("abc".to_string())).wait().unwrap();
         for (_, status) in room.statuses() {
-            assert!(status.gone().is_some());
+            assert!(status.is_gone().is_some());
         }
     }
 }
