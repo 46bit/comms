@@ -14,8 +14,12 @@ pub struct Room<I, T, R>
     timeout: ClientTimeout,
     ready_clients: HashMap<I, Client<I, T, R>>,
     gone_clients: HashMap<I, Client<I, T, R>>,
+    // Data for Sink
     start_send_list: Vec<(I, T::SinkItem)>,
     poll_complete_list: Vec<I>,
+    // Data for Stream
+    poll_list: Vec<I>,
+    poll_replies: HashMap<I, R::Item>,
 }
 
 impl<I, T, R> Room<I, T, R>
@@ -189,6 +193,8 @@ impl<I, T, R> Default for Room<I, T, R>
             gone_clients: HashMap::new(),
             start_send_list: vec![],
             poll_complete_list: vec![],
+            poll_list: vec![],
+            poll_replies: HashMap::new(),
         }
     }
 }
@@ -258,6 +264,54 @@ impl<I, T, R> Sink for Room<I, T, R>
 
         if self.start_send_list.is_empty() && self.poll_complete_list.is_empty() {
             Ok(Async::Ready(()))
+        } else {
+            Ok(Async::NotReady)
+        }
+    }
+}
+
+impl<I, T, R> Stream for Room<I, T, R>
+    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
+          T: Sink + 'static,
+          R: Stream + 'static,
+          T::SinkError: Clone,
+          R::Error: Clone
+{
+    type Item = HashMap<I, R::Item>;
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        if self.poll_list.is_empty() {
+            self.poll_list.extend(self.ready_clients.keys().cloned());
+        }
+
+        let poll_list = self.poll_list
+            .drain(..)
+            .collect::<Vec<_>>();
+        let poll_list = poll_list.into_iter()
+            .filter(|id| match self.ready_clients.get_mut(id) {
+                Some(client) => {
+                    match client.poll() {
+                        Ok(Async::NotReady) => true,
+                        // Client yielded a value or a non-disconnecting timeout was reached.
+                        Ok(Async::Ready(Some(maybe_msg))) => {
+                            if let Some(msg) = maybe_msg {
+                                self.poll_replies.insert(id.clone(), msg);
+                            }
+                            false
+                        }
+                        // Client stream ended or temporary error.
+                        Ok(Async::Ready(None)) |
+                        Err(_) => false,
+                    }
+                }
+                None => false,
+            })
+            .collect();
+        self.poll_list = poll_list;
+
+        if self.poll_list.is_empty() {
+            Ok(Async::Ready(Some(self.poll_replies.drain().collect())))
         } else {
             Ok(Async::NotReady)
         }
