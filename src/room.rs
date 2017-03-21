@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use std::hash::Hash;
 use std::collections::{HashMap, HashSet};
 use futures::{future, Future, Sink, Stream};
@@ -6,18 +5,23 @@ use futures::{future, Future, Sink, Stream};
 use super::*;
 
 pub struct Room<I, T, R>
-    where I: Clone + Send + Debug + PartialEq + Eq + Hash + 'static,
-          T: Sink + Debug + 'static,
-          R: Stream + Debug + 'static
+    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
+          T: Sink + 'static,
+          R: Stream + 'static,
+          T::SinkError: Clone,
+          R::Error: Clone
 {
+    timeout: ClientTimeout,
     ready_clients: HashMap<I, Client<I, T, R>>,
     gone_clients: HashMap<I, Client<I, T, R>>,
 }
 
 impl<I, T, R> Room<I, T, R>
-    where I: Clone + Send + Debug + PartialEq + Eq + Hash + 'static,
-          T: Sink + Debug + 'static,
-          R: Stream + Debug + 'static
+    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
+          T: Sink + 'static,
+          R: Stream + 'static,
+          T::SinkError: Clone,
+          R::Error: Clone
 {
     pub fn new(clients: Vec<Client<I, T, R>>) -> Room<I, T, R> {
         let mut room = Room::default();
@@ -27,8 +31,15 @@ impl<I, T, R> Room<I, T, R>
         room
     }
 
-    pub fn into_clients(self) -> (HashMap<I, Client<I, T, R>>, HashMap<I, Client<I, T, R>>) {
-        (self.ready_clients, self.gone_clients)
+    pub fn timeout(&self) -> &ClientTimeout {
+        &self.timeout
+    }
+
+    pub fn set_timeout(&mut self, timeout: ClientTimeout) {
+        for client in self.ready_clients.values_mut() {
+            client.set_timeout(timeout.clone());
+        }
+        self.timeout = timeout;
     }
 
     pub fn ids(&self) -> HashSet<I> {
@@ -45,10 +56,11 @@ impl<I, T, R> Room<I, T, R>
 
     // @TODO: Exists only for `Client::join`. When RFC1422 is stable, make this `pub(super)`.
     #[doc(hidden)]
-    pub fn insert(&mut self, client: Client<I, T, R>) -> bool {
+    pub fn insert(&mut self, mut client: Client<I, T, R>) -> bool {
         if self.contains(&client.id()) {
             return false;
         }
+        client.set_timeout(self.timeout.clone());
         if client.status().ready() {
             self.ready_clients.insert(client.id(), client);
         } else {
@@ -118,12 +130,10 @@ impl<I, T, R> Room<I, T, R>
         }))
     }
 
-    pub fn receive(mut self,
-                   timeout: ClientTimeout<'static>)
-                   -> Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>> {
+    pub fn receive(mut self) -> Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>> {
         let futures = self.ready_clients
             .drain()
-            .map(|(id, client)| client.receive(timeout).then(|v| future::ok((id, v))))
+            .map(|(id, client)| client.receive().then(|v| future::ok((id, v))))
             .collect::<Vec<_>>();
         Box::new(future::join_all(futures).map(|results| {
             let mut msgs = HashMap::new();
@@ -145,14 +155,13 @@ impl<I, T, R> Room<I, T, R>
     }
 
     pub fn receive_from(mut self,
-                        ids: Vec<I>,
-                        timeout: ClientTimeout<'static>)
+                        ids: Vec<I>)
                         -> Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>> {
         let futures = ids.into_iter()
             .filter_map(|id| {
                 self.ready_clients
                     .remove(&id)
-                    .map(|client| client.receive(timeout).then(|v| future::ok((id, v))))
+                    .map(|client| client.receive().then(|v| future::ok((id, v))))
             })
             .collect::<Vec<_>>();
         Box::new(future::join_all(futures).map(|results| {
@@ -181,15 +190,29 @@ impl<I, T, R> Room<I, T, R>
         let gs = self.gone_clients.iter().map(|(id, client)| (id.clone(), client.status()));
         rs.chain(gs).collect()
     }
+
+    pub fn close(&mut self) {
+        self.ready_clients.clear();
+        self.ready_clients.shrink_to_fit();
+        self.gone_clients.clear();
+        self.gone_clients.shrink_to_fit();
+    }
+
+    pub fn into_clients(self) -> (HashMap<I, Client<I, T, R>>, HashMap<I, Client<I, T, R>>) {
+        (self.ready_clients, self.gone_clients)
+    }
 }
 
 impl<I, T, R> Default for Room<I, T, R>
-    where I: Clone + Send + Debug + PartialEq + Eq + Hash + 'static,
-          T: Sink + Debug + 'static,
-          R: Stream + Debug + 'static
+    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
+          T: Sink + 'static,
+          R: Stream + 'static,
+          T::SinkError: Clone,
+          R::Error: Clone
 {
     fn default() -> Room<I, T, R> {
         Room {
+            timeout: ClientTimeout::None,
             ready_clients: HashMap::new(),
             gone_clients: HashMap::new(),
         }
@@ -237,8 +260,7 @@ mod tests {
         let (id0, id1) = (client0.id(), client1.id());
         let room = Room::new(vec![client0, client1]);
 
-        let timeout = ClientTimeout::None;
-        let mut future = executor::spawn(room.receive(timeout).fuse());
+        let mut future = executor::spawn(room.receive().fuse());
         assert!(future.poll_future(unpark_noop()).unwrap().is_not_ready());
 
         tx0.send(TinyMsg::A).wait().unwrap();

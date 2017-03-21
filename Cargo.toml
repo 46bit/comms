@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Michael Mokrysz <hi@46b.it>"]
 
 [dependencies]
-futures = "0.1"
+futures = { git = "https://github.com/sirpent-team/futures-rs", branch = "master" }
 tokio-timer = { git = "https://github.com/sirpent-team/tokio-timer", branch = "traits" }
 clippy = {version = "*", optional = true}
 
