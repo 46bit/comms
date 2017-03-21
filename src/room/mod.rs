@@ -24,10 +24,7 @@ pub struct Room<I, T, R>
     gone_clients: HashMap<I, Client<I, T, R>>,
     // Data for Sink
     start_send_list: Vec<(I, T::SinkItem)>,
-    poll_complete_list: Vec<I>,
-    // Data for Stream
-    poll_list: Vec<I>,
-    poll_replies: HashMap<I, R::Item>,
+    poll_complete_list: HashSet<I>,
 }
 
 impl<I, T, R> Room<I, T, R>
@@ -159,9 +156,7 @@ impl<I, T, R> Default for Room<I, T, R>
             ready_clients: HashMap::new(),
             gone_clients: HashMap::new(),
             start_send_list: vec![],
-            poll_complete_list: vec![],
-            poll_list: vec![],
-            poll_replies: HashMap::new(),
+            poll_complete_list: HashSet::new(),
         }
     }
 }
@@ -173,62 +168,45 @@ impl<I, T, R> Sink for Room<I, T, R>
           T::SinkError: Clone,
           R::Error: Clone
 {
-    type SinkItem = HashMap<I, T::SinkItem>;
+    type SinkItem = Vec<(I, T::SinkItem)>;
     type SinkError = ();
 
     fn start_send(&mut self, msgs: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        // To batch replies properly it's easier to do this than do something deeper.
-        if !self.start_send_list.is_empty() || !self.poll_complete_list.is_empty() {
-            return Ok(AsyncSink::NotReady(msgs));
-        }
-
-        for (id, msg) in msgs {
-            // @TODO: Error type for clients not in ready_clients+gone_clients.
-            if self.ready_clients.contains_key(&id) {
-                self.start_send_list.push((id, msg));
-            }
-        }
+        self.start_send_list.extend(msgs);
         Ok(AsyncSink::Ready)
     }
 
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        // @TODO: This uses some very nasty operations to get around borrowing self.
-        let start_send_list = self.start_send_list
-            .drain(..)
-            .collect::<Vec<_>>();
-        let start_send_list = start_send_list.into_iter()
-            .filter_map(|(id, msg)| match self.ready_clients.get_mut(&id) {
-                Some(client) => {
-                    match client.start_send(msg) {
-                        Ok(AsyncSink::NotReady(msg)) => Some((id, msg)),
-                        Ok(AsyncSink::Ready) => {
-                            self.poll_complete_list.push(id);
-                            None
-                        }
-                        Err(_) => None,
-                    }
+        let start_send_list = self.start_send_list.drain(..).collect::<Vec<_>>();
+        for (id, msg) in start_send_list {
+            let start_send = match self.ready_client_mut(&id) {
+                Some(ready_client) => ready_client.start_send(msg),
+                None => continue,
+            };
+            match start_send {
+                Ok(AsyncSink::NotReady(msg)) => {
+                    self.start_send_list.push((id, msg));
                 }
-                None => None,
-            })
-            .collect();
-        self.start_send_list = start_send_list;
+                Ok(AsyncSink::Ready) => {
+                    self.poll_complete_list.insert(id);
+                }
+                Err(_) => {}
+            }
+        }
 
-        // @TODO: This uses some very nasty operations to get around borrowing self.
-        let poll_complete_list = self.poll_complete_list
-            .drain(..)
-            .collect::<Vec<_>>();
-        let poll_complete_list = poll_complete_list.into_iter()
-            .filter(|id| match self.ready_clients.get_mut(id) {
-                Some(client) => {
-                    match client.poll_complete() {
-                        Ok(Async::NotReady) => true,
-                        Ok(Async::Ready(())) | Err(_) => false,
-                    }
+        let poll_complete_list = self.poll_complete_list.drain().collect::<Vec<_>>();
+        for id in poll_complete_list {
+            let poll_complete = match self.ready_client_mut(&id) {
+                Some(ready_client) => ready_client.poll_complete(),
+                None => continue,
+            };
+            match poll_complete {
+                Ok(Async::NotReady) => {
+                    self.poll_complete_list.insert(id);
                 }
-                None => false,
-            })
-            .collect();
-        self.poll_complete_list = poll_complete_list;
+                Ok(Async::Ready(())) | Err(_) => {}
+            }
+        }
 
         if self.start_send_list.is_empty() && self.poll_complete_list.is_empty() {
             Ok(Async::Ready(()))
@@ -245,52 +223,27 @@ impl<I, T, R> Stream for Room<I, T, R>
           T::SinkError: Clone,
           R::Error: Clone
 {
-    type Item = HashMap<I, R::Item>;
+    type Item = Vec<(I, R::Item)>;
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        // @TODO: The approach here is very brittle. It's as follows:
-        // - Polling should return a full set of client responses.
-        // - Clients added during the process might mean it never actually finishes.
-        // - As such we take the ready_clients existing when first polled, and only
-        //   receive from those.
-        // This is very brittle and very potentially surprising. It might be best to
-        // allow the never actually finishing possibility but very clearly document the
-        // potential problem.
-        if self.poll_list.is_empty() {
-            self.poll_list.extend(self.ready_clients.keys().cloned());
+        let mut msgs = vec![];
+        for client in self.ready_clients.values_mut() {
+            loop {
+                match client.poll() {
+                    Ok(Async::NotReady) => break,
+                    Ok(Async::Ready(Some(Some(msg)))) => msgs.push((client.id(), msg)),
+                    Ok(Async::Ready(Some(None))) |
+                    Ok(Async::Ready(None)) |
+                    Err(_) => {}
+                }
+            }
         }
 
-        // @TODO: This uses some very nasty operations to get around borrowing self.
-        let poll_list = self.poll_list
-            .drain(..)
-            .collect::<Vec<_>>();
-        let poll_list = poll_list.into_iter()
-            .filter(|id| match self.ready_clients.get_mut(id) {
-                Some(client) => {
-                    match client.poll() {
-                        Ok(Async::NotReady) => true,
-                        // Client yielded a value or a non-disconnecting timeout was reached.
-                        Ok(Async::Ready(Some(maybe_msg))) => {
-                            if let Some(msg) = maybe_msg {
-                                self.poll_replies.insert(id.clone(), msg);
-                            }
-                            false
-                        }
-                        // Client stream ended or temporary error.
-                        Ok(Async::Ready(None)) |
-                        Err(_) => false,
-                    }
-                }
-                None => false,
-            })
-            .collect();
-        self.poll_list = poll_list;
-
-        if self.poll_list.is_empty() {
-            Ok(Async::Ready(Some(self.poll_replies.drain().collect())))
-        } else {
+        if msgs.is_empty() {
             Ok(Async::NotReady)
+        } else {
+            Ok(Async::Ready(Some(msgs)))
         }
     }
 }
