@@ -1,7 +1,15 @@
+mod transmit;
+mod broadcast;
+mod receive;
+
+pub use self::transmit::*;
+pub use self::broadcast::*;
+pub use self::transmit::*;
+pub use self::receive::*;
+
 use std::hash::Hash;
 use std::collections::{HashMap, HashSet};
-use futures::{future, sink, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
-
+use futures::{Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use super::*;
 
 pub struct Room<I, T, R>
@@ -11,15 +19,12 @@ pub struct Room<I, T, R>
           T::SinkError: Clone,
           R::Error: Clone
 {
-    timeout: ClientTimeout,
+    timeout: Timeout,
     ready_clients: HashMap<I, Client<I, T, R>>,
     gone_clients: HashMap<I, Client<I, T, R>>,
     // Data for Sink
     start_send_list: Vec<(I, T::SinkItem)>,
-    poll_complete_list: Vec<I>,
-    // Data for Stream
-    poll_list: Vec<I>,
-    poll_replies: HashMap<I, R::Item>,
+    poll_complete_list: HashSet<I>,
 }
 
 impl<I, T, R> Room<I, T, R>
@@ -37,11 +42,11 @@ impl<I, T, R> Room<I, T, R>
         room
     }
 
-    pub fn timeout(&self) -> &ClientTimeout {
+    pub fn timeout(&self) -> &Timeout {
         &self.timeout
     }
 
-    pub fn set_timeout(&mut self, timeout: ClientTimeout) {
+    pub fn set_timeout(&mut self, timeout: Timeout) {
         for client in self.ready_clients.values_mut() {
             client.set_timeout(timeout.clone());
         }
@@ -58,6 +63,11 @@ impl<I, T, R> Room<I, T, R>
 
     pub fn gone_ids(&self) -> HashSet<I> {
         self.gone_clients.keys().cloned().collect()
+    }
+
+    #[doc(hidden)]
+    pub fn ready_client_mut(&mut self, id: &I) -> Option<&mut Client<I, T, R>> {
+        self.ready_clients.get_mut(id)
     }
 
     // @TODO: Exists only for `Client::join`. When RFC1422 is stable, make this `pub(super)`.
@@ -94,46 +104,52 @@ impl<I, T, R> Room<I, T, R>
     //     }
     // }
 
-    pub fn broadcast(self, msg: T::SinkItem) -> sink::Send<Self>
+    pub fn broadcast_all(self, msg: T::SinkItem) -> Broadcast<I, T, R>
         where T::SinkItem: Clone
     {
-        // @TODO: Lots of unnecessary allocations, but the alternative is a lot of code.
-        let msgs = self.ready_clients.keys().cloned().map(|id| (id, msg.clone())).collect();
-        self.send(msgs)
+        let ids = self.ready_clients.keys().cloned().collect();
+        Broadcast::new(self, msg, ids)
     }
 
-    pub fn transmit(self, msgs: HashMap<I, T::SinkItem>) -> sink::Send<Self> {
-        self.send(msgs)
+    pub fn broadcast(self, msg: T::SinkItem, ids: HashSet<I>) -> Broadcast<I, T, R>
+        where T::SinkItem: Clone
+    {
+        Broadcast::new(self, msg, ids.into_iter().collect())
     }
 
-    pub fn receive(self) -> Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>> {
-        Box::new(self.into_future()
-            .then(|result| match result {
-                Ok((Some(msgs), client)) => future::ok((msgs, client)),
-                Ok((None, client)) => future::ok((HashMap::new(), client)),
-                Err(_) => unreachable!()
-            }))
+    pub fn transmit(self, msgs: HashMap<I, T::SinkItem>) -> Transmit<I, T, R> {
+        Transmit::new(self, msgs.into_iter().collect())
     }
 
-    pub fn receive_from(mut self,
-                        ids: Vec<I>)
-                        -> Option<Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>>> {
-        if !self.poll_list.is_empty() || !self.poll_replies.is_empty() {
-            return None;
-        }
-        self.poll_list = ids;
-        Some(self.receive())
+    pub fn receive_all(self) -> Receive<I, T, R> {
+        let ids = self.ready_clients.keys().cloned().collect();
+        Receive::new(self, ids)
+    }
+
+    pub fn receive(self, ids: HashSet<I>) -> Receive<I, T, R> {
+        Receive::new(self, ids.into_iter().collect())
     }
 
     // @TODO: When client has a method to check its status against the internal rx/tx,
     // update this to use it (or make a new method to.)
-    pub fn statuses(&self) -> HashMap<I, ClientStatus<T::SinkError, R::Error>> {
+    pub fn statuses(&self) -> HashMap<I, Status<T::SinkError, R::Error>> {
         let rs = self.ready_clients.iter().map(|(id, client)| (id.clone(), client.status()));
         let gs = self.gone_clients.iter().map(|(id, client)| (id.clone(), client.status()));
         rs.chain(gs).collect()
     }
 
-    pub fn close(&mut self) {
+    pub fn close(&mut self, ids: HashSet<I>) {
+        for id in ids {
+            let mut client = match self.ready_clients.remove(&id) {
+                Some(client) => client,
+                None => continue,
+            };
+            client.close();
+            self.gone_clients.insert(id, client);
+        }
+    }
+
+    pub fn close_all(&mut self) {
         self.ready_clients.clear();
         self.ready_clients.shrink_to_fit();
         self.gone_clients.clear();
@@ -154,13 +170,11 @@ impl<I, T, R> Default for Room<I, T, R>
 {
     fn default() -> Room<I, T, R> {
         Room {
-            timeout: ClientTimeout::None,
+            timeout: Timeout::None,
             ready_clients: HashMap::new(),
             gone_clients: HashMap::new(),
             start_send_list: vec![],
-            poll_complete_list: vec![],
-            poll_list: vec![],
-            poll_replies: HashMap::new(),
+            poll_complete_list: HashSet::new(),
         }
     }
 }
@@ -172,62 +186,45 @@ impl<I, T, R> Sink for Room<I, T, R>
           T::SinkError: Clone,
           R::Error: Clone
 {
-    type SinkItem = HashMap<I, T::SinkItem>;
+    type SinkItem = Vec<(I, T::SinkItem)>;
     type SinkError = ();
 
     fn start_send(&mut self, msgs: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        // To batch replies properly it's easier to do this than do something deeper.
-        if !self.start_send_list.is_empty() || !self.poll_complete_list.is_empty() {
-            return Ok(AsyncSink::NotReady(msgs));
-        }
-
-        for (id, msg) in msgs {
-            // @TODO: Error type for clients not in ready_clients+gone_clients.
-            if self.ready_clients.contains_key(&id) {
-                self.start_send_list.push((id, msg));
-            }
-        }
+        self.start_send_list.extend(msgs);
         Ok(AsyncSink::Ready)
     }
 
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        // @TODO: This uses some very nasty operations to get around borrowing self.
-        let start_send_list = self.start_send_list
-            .drain(..)
-            .collect::<Vec<_>>();
-        let start_send_list = start_send_list.into_iter()
-            .filter_map(|(id, msg)| match self.ready_clients.get_mut(&id) {
-                Some(client) => {
-                    match client.start_send(msg) {
-                        Ok(AsyncSink::NotReady(msg)) => Some((id, msg)),
-                        Ok(AsyncSink::Ready) => {
-                            self.poll_complete_list.push(id);
-                            None
-                        }
-                        Err(_) => None,
-                    }
+        let start_send_list = self.start_send_list.drain(..).collect::<Vec<_>>();
+        for (id, msg) in start_send_list {
+            let start_send = match self.ready_client_mut(&id) {
+                Some(ready_client) => ready_client.start_send(msg),
+                None => continue,
+            };
+            match start_send {
+                Ok(AsyncSink::NotReady(msg)) => {
+                    self.start_send_list.push((id, msg));
                 }
-                None => None,
-            })
-            .collect();
-        self.start_send_list = start_send_list;
+                Ok(AsyncSink::Ready) => {
+                    self.poll_complete_list.insert(id);
+                }
+                Err(_) => {}
+            }
+        }
 
-        // @TODO: This uses some very nasty operations to get around borrowing self.
-        let poll_complete_list = self.poll_complete_list
-            .drain(..)
-            .collect::<Vec<_>>();
-        let poll_complete_list = poll_complete_list.into_iter()
-            .filter(|id| match self.ready_clients.get_mut(id) {
-                Some(client) => {
-                    match client.poll_complete() {
-                        Ok(Async::NotReady) => true,
-                        Ok(Async::Ready(())) | Err(_) => false,
-                    }
+        let poll_complete_list = self.poll_complete_list.drain().collect::<Vec<_>>();
+        for id in poll_complete_list {
+            let poll_complete = match self.ready_client_mut(&id) {
+                Some(ready_client) => ready_client.poll_complete(),
+                None => continue,
+            };
+            match poll_complete {
+                Ok(Async::NotReady) => {
+                    self.poll_complete_list.insert(id);
                 }
-                None => false,
-            })
-            .collect();
-        self.poll_complete_list = poll_complete_list;
+                Ok(Async::Ready(())) | Err(_) => {}
+            }
+        }
 
         if self.start_send_list.is_empty() && self.poll_complete_list.is_empty() {
             Ok(Async::Ready(()))
@@ -244,52 +241,27 @@ impl<I, T, R> Stream for Room<I, T, R>
           T::SinkError: Clone,
           R::Error: Clone
 {
-    type Item = HashMap<I, R::Item>;
+    type Item = Vec<(I, R::Item)>;
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        // @TODO: The approach here is very brittle. It's as follows:
-        // - Polling should return a full set of client responses.
-        // - Clients added during the process might mean it never actually finishes.
-        // - As such we take the ready_clients existing when first polled, and only
-        //   receive from those.
-        // This is very brittle and very potentially surprising. It might be best to
-        // allow the never actually finishing possibility but very clearly document the
-        // potential problem.
-        if self.poll_list.is_empty() {
-            self.poll_list.extend(self.ready_clients.keys().cloned());
+        let mut msgs = vec![];
+        for client in self.ready_clients.values_mut() {
+            loop {
+                match client.poll() {
+                    Ok(Async::NotReady) => break,
+                    Ok(Async::Ready(Some(Some(msg)))) => msgs.push((client.id(), msg)),
+                    Ok(Async::Ready(Some(None))) |
+                    Ok(Async::Ready(None)) |
+                    Err(_) => {}
+                }
+            }
         }
 
-        // @TODO: This uses some very nasty operations to get around borrowing self.
-        let poll_list = self.poll_list
-            .drain(..)
-            .collect::<Vec<_>>();
-        let poll_list = poll_list.into_iter()
-            .filter(|id| match self.ready_clients.get_mut(id) {
-                Some(client) => {
-                    match client.poll() {
-                        Ok(Async::NotReady) => true,
-                        // Client yielded a value or a non-disconnecting timeout was reached.
-                        Ok(Async::Ready(Some(maybe_msg))) => {
-                            if let Some(msg) = maybe_msg {
-                                self.poll_replies.insert(id.clone(), msg);
-                            }
-                            false
-                        }
-                        // Client stream ended or temporary error.
-                        Ok(Async::Ready(None)) |
-                        Err(_) => false,
-                    }
-                }
-                None => false,
-            })
-            .collect();
-        self.poll_list = poll_list;
-
-        if self.poll_list.is_empty() {
-            Ok(Async::Ready(Some(self.poll_replies.drain().collect())))
-        } else {
+        if msgs.is_empty() {
             Ok(Async::NotReady)
+        } else {
+            Ok(Async::Ready(Some(msgs)))
         }
     }
 }
@@ -301,12 +273,12 @@ mod tests {
     use futures::{executor, Future, Stream};
 
     #[test]
-    fn can_broadcast() {
+    fn can_broadcast_all() {
         let (rx0, _, client0) = mock_client("client0", 1);
         let (rx1, _, client1) = mock_client("client1", 1);
         let room = Room::new(vec![client0, client1]);
 
-        room.broadcast(TinyMsg::A).wait().unwrap();
+        room.broadcast_all(TinyMsg::A).wait().unwrap();
         assert_eq!(rx0.into_future().wait().unwrap().0, Some(TinyMsg::A));
         assert_eq!(rx1.into_future().wait().unwrap().0, Some(TinyMsg::A));
     }
@@ -329,13 +301,13 @@ mod tests {
     }
 
     #[test]
-    fn can_receive() {
+    fn can_receive_all() {
         let (_, tx0, client0) = mock_client("client0", 1);
         let (_, tx1, client1) = mock_client("client1", 1);
         let (id0, id1) = (client0.id(), client1.id());
         let room = Room::new(vec![client0, client1]);
 
-        let mut future = executor::spawn(room.receive().fuse());
+        let mut future = executor::spawn(room.receive_all().fuse());
         assert!(future.poll_future(unpark_noop()).unwrap().is_not_ready());
 
         tx0.send(TinyMsg::A).wait().unwrap();
@@ -379,7 +351,7 @@ mod tests {
             }
         }
 
-        room = room.broadcast(TinyMsg::B("abc".to_string())).wait().unwrap();
+        room = room.broadcast_all(TinyMsg::B("abc".to_string())).wait().unwrap();
         for (_, status) in room.statuses() {
             assert!(status.gone().is_some());
         }
