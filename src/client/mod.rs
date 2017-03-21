@@ -9,7 +9,7 @@ struct ClientInner<T, R>
           R: Stream + 'static
 {
     tx: T,
-    rx: R,
+    rx: Peekable<R>,
     sleep: Option<tokio_timer::Sleep>,
 }
 

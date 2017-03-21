@@ -93,17 +93,6 @@ impl<I, T, R> Room<I, T, R>
         self.ready_clients.contains_key(id) || self.gone_clients.contains_key(id)
     }
 
-    // pub fn filter<F>(&self, ids: Vec<&I>) -> FilteredRoom<I, T, R>
-    //     where F: FnMut(&Client<T, R>) -> bool,
-    //           T: Clone,
-    //           R: Clone
-    // {
-    //     FilteredRoom {
-    //         room_inner: self.inner.clone(),
-    //         client_ids: ids,
-    //     }
-    // }
-
     pub fn broadcast_all(self, msg: T::SinkItem) -> Broadcast<I, T, R>
         where T::SinkItem: Clone
     {
@@ -132,7 +121,7 @@ impl<I, T, R> Room<I, T, R>
 
     // @TODO: When client has a method to check its status against the internal rx/tx,
     // update this to use it (or make a new method to.)
-    pub fn statuses(&self) -> HashMap<I, Status<T::SinkError, R::Error>> {
+    pub fn status(&self) -> HashMap<I, Status<T::SinkError, R::Error>> {
         let rs = self.ready_clients.iter().map(|(id, client)| (id.clone(), client.status()));
         let gs = self.gone_clients.iter().map(|(id, client)| (id.clone(), client.status()));
         rs.chain(gs).collect()
@@ -320,7 +309,7 @@ mod tests {
         match future.wait_future() {
             Ok((msgs, room)) => {
                 assert_eq!(msgs, exp_msgs);
-                assert_eq!(room.statuses()
+                assert_eq!(room.status()
                                .into_iter()
                                .map(|(id, status)| (id, status.ready()))
                                .collect::<HashMap<_, _>>(),
@@ -331,19 +320,19 @@ mod tests {
     }
 
     #[test]
-    fn can_statuses() {
+    fn can_status() {
         let (_, _, client0) = mock_client("client0", 1);
         let (_, _, client1) = mock_client("client1", 1);
 
         let mut room = Room::new(vec![client0, client1]);
-        for (_, status) in room.statuses() {
+        for (_, status) in room.status() {
             assert!(status.ready());
         }
 
         let mut msgs = HashMap::new();
         msgs.insert("client0".to_string(), TinyMsg::A);
         room = room.transmit(msgs).wait().unwrap();
-        for (id, status) in room.statuses() {
+        for (id, status) in room.status() {
             if id == "client0".to_string() {
                 assert!(status.gone().is_some());
             } else {
@@ -352,7 +341,7 @@ mod tests {
         }
 
         room = room.broadcast_all(TinyMsg::B("abc".to_string())).wait().unwrap();
-        for (_, status) in room.statuses() {
+        for (_, status) in room.status() {
             assert!(status.gone().is_some());
         }
     }
