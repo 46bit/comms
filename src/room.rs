@@ -106,28 +106,10 @@ impl<I, T, R> Room<I, T, R>
         self.send(msgs)
     }
 
-    pub fn receive(mut self) -> Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>> {
-        let futures = self.ready_clients
-            .drain()
-            .map(|(id, client)| client.receive().then(|v| future::ok((id, v))))
-            .collect::<Vec<_>>();
-        Box::new(future::join_all(futures).map(|results| {
-            let mut msgs = HashMap::new();
-            for (id, result) in results {
-                match result {
-                    Ok((maybe_msg, ready_client)) => {
-                        if let Some(msg) = maybe_msg {
-                            msgs.insert(id.clone(), msg);
-                        }
-                        self.ready_clients.insert(id, ready_client);
-                    }
-                    Err(gone_client) => {
-                        self.gone_clients.insert(id, gone_client);
-                    }
-                }
-            }
-            (msgs, self)
-        }))
+    pub fn receive(self) -> Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>> {
+        Box::new(self.into_future()
+            .map(|(maybe_msgs, self_)| (maybe_msgs.unwrap(), self_))
+            .map_err(|_| ()))
     }
 
     pub fn receive_from(mut self,
@@ -224,8 +206,8 @@ impl<I, T, R> Sink for Room<I, T, R>
         Ok(AsyncSink::Ready)
     }
 
-    // @TODO: This uses some very nasty operations to get around borrowing self.
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        // @TODO: This uses some very nasty operations to get around borrowing self.
         let start_send_list = self.start_send_list
             .drain(..)
             .collect::<Vec<_>>();
@@ -246,6 +228,7 @@ impl<I, T, R> Sink for Room<I, T, R>
             .collect();
         self.start_send_list = start_send_list;
 
+        // @TODO: This uses some very nasty operations to get around borrowing self.
         let poll_complete_list = self.poll_complete_list
             .drain(..)
             .collect::<Vec<_>>();
@@ -281,10 +264,19 @@ impl<I, T, R> Stream for Room<I, T, R>
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        // @TODO: The approach here is very brittle. It's as follows:
+        // - Polling should return a full set of client responses.
+        // - Clients added during the process might mean it never actually finishes.
+        // - As such we take the ready_clients existing when first polled, and only
+        //   receive from those.
+        // This is very brittle and very potentially surprising. It might be best to
+        // allow the never actually finishing possibility but very clearly document the
+        // potential problem.
         if self.poll_list.is_empty() {
             self.poll_list.extend(self.ready_clients.keys().cloned());
         }
 
+        // @TODO: This uses some very nasty operations to get around borrowing self.
         let poll_list = self.poll_list
             .drain(..)
             .collect::<Vec<_>>();
