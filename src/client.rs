@@ -169,8 +169,12 @@ impl<'a, T, R> Future for Receive<'a, T, R>
         let polled = self.rx.as_mut().unwrap().poll();
         match polled {
             Ok(Async::NotReady) => {}
-            Ok(Async::Ready(maybe_item)) => {
-                return Ok(Async::Ready((maybe_item, self.rx.take().unwrap())));
+            Ok(Async::Ready(Some(item))) => {
+                return Ok(Async::Ready((Some(item), self.rx.take().unwrap())));
+            }
+            Ok(Async::Ready(None)) => {
+                self.rx.take();
+                return Ok(Err(ClientError::Closed));
             }
             Err(e) => return Err(ClientError::Stream(e)),
         }
