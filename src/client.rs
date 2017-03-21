@@ -1,6 +1,6 @@
 use std::hash::Hash;
 use std::fmt::{self, Debug};
-use futures::{Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
+use futures::{future, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use tokio_timer;
 use super::*;
 
@@ -112,8 +112,10 @@ impl<I, T, R> Client<I, T, R>
     //     unreachable!()
     pub fn receive(self) -> Box<Future<Item = (Option<R::Item>, Self), Error = Self>> {
         Box::new(self.into_future()
-            .map(|(i, client)| (i.unwrap(), client))
-            .map_err(|(_, client)| client))
+            .then(|result| match result {
+                Ok((Some(maybe_msg), client)) => future::ok((maybe_msg, client)),
+                Ok((None, client)) | Err((_, client)) => future::err(client),
+            }))
     }
 
     pub fn status(&self) -> ClientStatus<T::SinkError, R::Error> {

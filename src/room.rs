@@ -108,8 +108,11 @@ impl<I, T, R> Room<I, T, R>
 
     pub fn receive(self) -> Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>> {
         Box::new(self.into_future()
-            .map(|(maybe_msgs, self_)| (maybe_msgs.unwrap(), self_))
-            .map_err(|_| ()))
+            .then(|result| match result {
+                Ok((Some(msgs), client)) => future::ok((msgs, client)),
+                Ok((None, client)) => future::ok((HashMap::new(), client)),
+                Err(_) => unreachable!()
+            }))
     }
 
     pub fn receive_from(mut self,
@@ -119,9 +122,7 @@ impl<I, T, R> Room<I, T, R>
             return None;
         }
         self.poll_list = ids;
-        Some(Box::new(self.into_future()
-            .map(|(maybe_msgs, self_)| (maybe_msgs.unwrap(), self_))
-            .map_err(|_| ())))
+        Some(self.receive())
     }
 
     // @TODO: When client has a method to check its status against the internal rx/tx,
