@@ -1,8 +1,17 @@
-use std::collections::VecDeque;
-use futures::{Future, Sink, Stream, Poll, Async, AsyncSink};
-use futures::sync::mpsc;
+extern crate futures;
+extern crate comms;
 
-use net::*;
+use std::collections::VecDeque;
+use futures::{future, sink, stream, Future, Sink, Stream, Poll, Async, AsyncSink};
+use futures::stream::{SplitSink, SplitStream};
+use futures::sync::mpsc;
+use comms::*;
+
+enum Msg {
+    Alpha,
+    Beta(bool),
+    Gamma(usize),
+}
 
 type PeerId = u64;
 type ActorId = u64;
@@ -108,7 +117,7 @@ impl Future for Spectators {
                     let actor_id = match self.peer_actor_map.get(&id) {
                         Some(actor_id) => actor_id,
                         None => {
-                            println!("Peer {} had not Actor set.");
+                            println!("Peer {} had not Actor set.", peer_id);
                             continue;
                         }
                     };
