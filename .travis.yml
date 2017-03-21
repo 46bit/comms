@@ -23,7 +23,7 @@ addons:
     - libdw-dev
     - binutils-dev
 after_success:
-- travis-cargo doc-upload --branch master
+- travis-cargo --only stable doc-upload
 - travis-cargo coveralls --no-sudo
 notifications:
   email:
