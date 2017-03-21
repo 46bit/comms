@@ -144,6 +144,36 @@ impl<I, T, R> Room<I, T, R>
         }))
     }
 
+    pub fn receive_from(mut self,
+                        ids: Vec<I>,
+                        timeout: ClientTimeout<'static>)
+                        -> Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>> {
+        let futures = ids.into_iter()
+            .filter_map(|id| {
+                self.ready_clients
+                    .remove(&id)
+                    .map(|client| client.receive(timeout).then(|v| future::ok((id, v))))
+            })
+            .collect::<Vec<_>>();
+        Box::new(future::join_all(futures).map(|results| {
+            let mut msgs = HashMap::new();
+            for (id, result) in results {
+                match result {
+                    Ok((maybe_msg, ready_client)) => {
+                        if let Some(msg) = maybe_msg {
+                            msgs.insert(id.clone(), msg);
+                        }
+                        self.ready_clients.insert(id, ready_client);
+                    }
+                    Err(gone_client) => {
+                        self.gone_clients.insert(id, gone_client);
+                    }
+                }
+            }
+            (msgs, self)
+        }))
+    }
+
     // @TODO: When client has a method to check its status against the internal rx/tx,
     // update this to use it (or make a new method to.)
     pub fn statuses(&self) -> HashMap<I, ClientStatus<T::SinkError, R::Error>> {
