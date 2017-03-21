@@ -1,6 +1,6 @@
 use std::hash::Hash;
 use std::collections::{HashMap, HashSet};
-use futures::{future, Future, Sink, Stream};
+use futures::{future, sink, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
 
 use super::*;
 
@@ -14,6 +14,8 @@ pub struct Room<I, T, R>
     timeout: ClientTimeout,
     ready_clients: HashMap<I, Client<I, T, R>>,
     gone_clients: HashMap<I, Client<I, T, R>>,
+    start_send_list: Vec<(I, T::SinkItem)>,
+    poll_complete_list: Vec<I>,
 }
 
 impl<I, T, R> Room<I, T, R>
@@ -88,46 +90,16 @@ impl<I, T, R> Room<I, T, R>
     //     }
     // }
 
-    pub fn broadcast(mut self, msg: T::SinkItem) -> Box<Future<Item = Self, Error = ()>>
+    pub fn broadcast(self, msg: T::SinkItem) -> sink::Send<Self>
         where T::SinkItem: Clone
     {
-        let futures =
-            self.ready_clients
-                .drain()
-                .map(|(id, client)| {
-                    client.transmit(msg.clone()).then(|result| future::ok((id, result)))
-                })
-                .collect::<Vec<_>>();
-        Box::new(future::join_all(futures).map(|results| {
-            for (id, result) in results {
-                match result {
-                    Ok(ready_client) => self.ready_clients.insert(id, ready_client),
-                    Err(gone_client) => self.gone_clients.insert(id, gone_client),
-                };
-            }
-            self
-        }))
+        // @TODO: Lots of unnecessary allocations, but the alternative is a lot of code.
+        let msgs = self.ready_clients.keys().cloned().map(|id| (id, msg.clone())).collect();
+        self.send(msgs)
     }
 
-    pub fn transmit(mut self,
-                    msgs: HashMap<I, T::SinkItem>)
-                    -> Box<Future<Item = Self, Error = ()>> {
-        let futures = msgs.into_iter()
-            .filter_map(|(id, msg)| {
-                self.ready_clients
-                    .remove(&id)
-                    .map(|client| client.transmit(msg).then(|result| future::ok((id, result))))
-            })
-            .collect::<Vec<_>>();
-        Box::new(future::join_all(futures).map(|results| {
-            for (id, result) in results {
-                match result {
-                    Ok(ready_client) => self.ready_clients.insert(id, ready_client),
-                    Err(gone_client) => self.gone_clients.insert(id, gone_client),
-                };
-            }
-            self
-        }))
+    pub fn transmit(self, msgs: HashMap<I, T::SinkItem>) -> sink::Send<Self> {
+        self.send(msgs)
     }
 
     pub fn receive(mut self) -> Box<Future<Item = (HashMap<I, R::Item>, Self), Error = ()>> {
@@ -215,6 +187,79 @@ impl<I, T, R> Default for Room<I, T, R>
             timeout: ClientTimeout::None,
             ready_clients: HashMap::new(),
             gone_clients: HashMap::new(),
+            start_send_list: vec![],
+            poll_complete_list: vec![],
+        }
+    }
+}
+
+impl<I, T, R> Sink for Room<I, T, R>
+    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
+          T: Sink + 'static,
+          R: Stream + 'static,
+          T::SinkError: Clone,
+          R::Error: Clone
+{
+    type SinkItem = HashMap<I, T::SinkItem>;
+    type SinkError = ();
+
+    fn start_send(&mut self, msgs: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        // To batch replies properly it's easier to do this than do something deeper.
+        if !self.start_send_list.is_empty() || !self.poll_complete_list.is_empty() {
+            return Ok(AsyncSink::NotReady(msgs));
+        }
+
+        for (id, msg) in msgs {
+            // @TODO: Error type for clients not in ready_clients+gone_clients.
+            if self.ready_clients.contains_key(&id) {
+                self.start_send_list.push((id, msg));
+            }
+        }
+        Ok(AsyncSink::Ready)
+    }
+
+    // @TODO: This uses some very nasty operations to get around borrowing self.
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        let start_send_list = self.start_send_list
+            .drain(..)
+            .collect::<Vec<_>>();
+        let start_send_list = start_send_list.into_iter()
+            .filter_map(|(id, msg)| match self.ready_clients.get_mut(&id) {
+                Some(client) => {
+                    match client.start_send(msg) {
+                        Ok(AsyncSink::NotReady(msg)) => Some((id, msg)),
+                        Ok(AsyncSink::Ready) => {
+                            self.poll_complete_list.push(id);
+                            None
+                        }
+                        Err(_) => None,
+                    }
+                }
+                None => None,
+            })
+            .collect();
+        self.start_send_list = start_send_list;
+
+        let poll_complete_list = self.poll_complete_list
+            .drain(..)
+            .collect::<Vec<_>>();
+        let poll_complete_list = poll_complete_list.into_iter()
+            .filter(|id| match self.ready_clients.get_mut(id) {
+                Some(client) => {
+                    match client.poll_complete() {
+                        Ok(Async::NotReady) => true,
+                        Ok(Async::Ready(())) | Err(_) => false,
+                    }
+                }
+                None => false,
+            })
+            .collect();
+        self.poll_complete_list = poll_complete_list;
+
+        if self.start_send_list.is_empty() && self.poll_complete_list.is_empty() {
+            Ok(Async::Ready(()))
+        } else {
+            Ok(Async::NotReady)
         }
     }
 }
