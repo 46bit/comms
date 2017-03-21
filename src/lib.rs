@@ -104,8 +104,12 @@ impl Timeout {
 /// The easiest way to convert a `Stream<Error = io::Error>` or `Sink<SinkError = io::Error>`
 /// is using `futures::Stream::from_err` and `futures::Sink::sink_from_err`.
 ///
-/// ``` rust
-/// let stream = stream::iter(vec![Ok(5), Err(io::Error::new(ErrorKind::Other, "oh no!"))]);
+/// ```rust,ignore
+/// extern crate futures;
+/// use std::io;
+/// use futures::{stream, Stream};
+///
+/// let stream = stream::iter(vec![Ok(5), Err(io::Error::new(io::ErrorKind::Other, "oh no!"))]);
 /// let stream_with_clone_error: Stream<Item = u64, Error = IoErrorString> = stream.from_err();
 /// ```
 #[derive(Debug, Clone, PartialEq)]

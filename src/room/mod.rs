@@ -104,10 +104,17 @@ impl<I, T, R> Room<I, T, R>
     //     }
     // }
 
-    pub fn broadcast(self, msg: T::SinkItem) -> Broadcast<I, T, R>
+    pub fn broadcast_all(self, msg: T::SinkItem) -> Broadcast<I, T, R>
         where T::SinkItem: Clone
     {
-        Broadcast::new(self, msg)
+        let ids = self.ready_clients.keys().cloned().collect();
+        Broadcast::new(self, msg, ids)
+    }
+
+    pub fn broadcast(self, msg: T::SinkItem, ids: HashSet<I>) -> Broadcast<I, T, R>
+        where T::SinkItem: Clone
+    {
+        Broadcast::new(self, msg, ids.into_iter().collect())
     }
 
     pub fn transmit(self, msgs: HashMap<I, T::SinkItem>) -> Transmit<I, T, R> {
@@ -131,7 +138,18 @@ impl<I, T, R> Room<I, T, R>
         rs.chain(gs).collect()
     }
 
-    pub fn close(&mut self) {
+    pub fn close(&mut self, ids: HashSet<I>) {
+        for id in ids {
+            let mut client = match self.ready_clients.remove(&id) {
+                Some(client) => client,
+                None => continue
+            };
+            client.close();
+            self.gone_clients.insert(id, client);
+        }
+    }
+
+    pub fn close_all(&mut self) {
         self.ready_clients.clear();
         self.ready_clients.shrink_to_fit();
         self.gone_clients.clear();
@@ -255,12 +273,12 @@ mod tests {
     use futures::{executor, Future, Stream};
 
     #[test]
-    fn can_broadcast() {
+    fn can_broadcast_all() {
         let (rx0, _, client0) = mock_client("client0", 1);
         let (rx1, _, client1) = mock_client("client1", 1);
         let room = Room::new(vec![client0, client1]);
 
-        room.broadcast(TinyMsg::A).wait().unwrap();
+        room.broadcast_all(TinyMsg::A).wait().unwrap();
         assert_eq!(rx0.into_future().wait().unwrap().0, Some(TinyMsg::A));
         assert_eq!(rx1.into_future().wait().unwrap().0, Some(TinyMsg::A));
     }
@@ -333,7 +351,7 @@ mod tests {
             }
         }
 
-        room = room.broadcast(TinyMsg::B("abc".to_string())).wait().unwrap();
+        room = room.broadcast_all(TinyMsg::B("abc".to_string())).wait().unwrap();
         for (_, status) in room.statuses() {
             assert!(status.gone().is_some());
         }

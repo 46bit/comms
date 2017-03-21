@@ -24,12 +24,11 @@ impl<I, T, R> Broadcast<I, T, R>
           T::SinkError: Clone,
           R::Error: Clone
 {
-    pub fn new(room: Room<I, T, R>, msg: T::SinkItem) -> Broadcast<I, T, R> {
-        let ready_client_ids = room.ready_ids().into_iter().collect();
+    pub fn new(room: Room<I, T, R>, msg: T::SinkItem, ids: Vec<I>) -> Broadcast<I, T, R> {
         Broadcast {
             room: Some(room),
             msg: msg,
-            start_send_list: ready_client_ids,
+            start_send_list: ids,
             poll_complete_list: vec![],
         }
     }
