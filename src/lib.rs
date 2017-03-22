@@ -143,21 +143,21 @@ impl Timeout {
 /// let stream_with_clone_error: Stream<Item = u64, Error = IoErrorString> = stream.from_err();
 /// ```
 #[derive(Debug, Clone, PartialEq)]
-pub struct IoErrorString(String);
+pub struct ErrorString(String);
 
-impl From<io::Error> for IoErrorString {
-    fn from(e: io::Error) -> IoErrorString {
-        IoErrorString(format!("{}", e))
+impl From<io::Error> for ErrorString {
+    fn from(e: io::Error) -> ErrorString {
+        ErrorString(format!("{}", e))
     }
 }
 
-impl fmt::Display for IoErrorString {
+impl fmt::Display for ErrorString {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl error::Error for IoErrorString {
+impl error::Error for ErrorString {
     fn description(&self) -> &str {
         &self.0
     }

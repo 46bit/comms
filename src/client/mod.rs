@@ -2,6 +2,8 @@ use std::hash::Hash;
 use std::fmt::{self, Debug};
 use futures::{future, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use futures::sync::mpsc;
+use futures::stream::{FromErr, SplitStream, SplitSink};
+use futures::sink::SinkFromErr;
 use tokio_timer;
 use super::*;
 
@@ -15,7 +17,7 @@ use super::*;
 /// allows specifying whether to have a timeout and whether the client should
 /// be disconnected should the timeout not be met.
 pub struct Client<I, C>
-    where I: Clone + Send + 'static,
+    where I: Clone + Send + Debug + 'static,
           C: Sink + Stream + 'static,
           C::SinkError: Clone,
           C::Error: Clone
@@ -27,7 +29,7 @@ pub struct Client<I, C>
 }
 
 impl<I, T, R> Client<I, Unsplit<T, R>>
-    where I: Clone + Send + 'static,
+    where I: Clone + Send + Debug + 'static,
           T: Sink + 'static,
           R: Stream + 'static,
           T::SinkError: Clone,
@@ -37,12 +39,32 @@ impl<I, T, R> Client<I, Unsplit<T, R>>
     ///
     /// Created from the ID, a timeout strategy, a `Sink` and a `Stream`.
     pub fn new_from_split(id: I, timeout: Timeout, tx: T, rx: R) -> Client<I, Unsplit<T, R>> {
-        Client {
-            id: id,
-            timeout: timeout,
-            sleep: None,
-            inner: Ok(Unsplit { tx: tx, rx: rx }),
-        }
+        Client::new(id, timeout, Unsplit { tx: tx, rx: rx })
+    }
+}
+
+// @TODO: Implement `Sink` on `futures::stream::FromErr` to simplify these types.
+impl<I, C> Client<I,
+                  Unsplit<SinkFromErr<SplitSink<C>, ErrorString>,
+                          FromErr<SplitStream<C>, ErrorString>>>
+    where I: Clone + Send + Debug + 'static,
+          C: Sink<SinkError = io::Error> + Stream<Error = io::Error> + 'static
+{
+    /// Create a new client from a `Sink + Stream` that uses `io::Error`.
+    ///
+    /// ```rust,ignore
+    /// listener.incoming()
+    ///     .for_each(move |(socket, addr)| {
+    ///         let client = Client::new_from_io(Uuid::new_v4(), ClientTimeout::None, socket.framed(MsgCodec));
+    /// ```
+    pub fn new_from_io(id: I,
+                       timeout: Timeout,
+                       tx_rx: C)
+                       -> Client<I,
+                                 Unsplit<SinkFromErr<SplitSink<C>, ErrorString>,
+                                         FromErr<SplitStream<C>, ErrorString>>> {
+        let (tx, rx) = tx_rx.split();
+        Client::new_from_split(id, timeout, tx.sink_from_err(), rx.from_err())
     }
 }
 
@@ -61,12 +83,7 @@ impl<I, C> Client<I, C>
     /// Create a new client from a `Sink + Stream`.
     ///
     /// Created from the ID, a timeout strategy, and a `Sink + Stream`.
-    pub fn new<T, R>(id: I, timeout: Timeout, tx_rx: C) -> Client<I, C>
-        where T: Sink + 'static,
-              R: Stream + 'static,
-              T::SinkError: Clone,
-              R::Error: Clone
-    {
+    pub fn new(id: I, timeout: Timeout, tx_rx: C) -> Client<I, C> {
         Client {
             id: id,
             timeout: timeout,
@@ -82,7 +99,7 @@ impl<I, C> Client<I, C>
 
     /// Change the client's ID. The new ID can be of a different type.
     pub fn rename<J>(self, new_id: J) -> Client<J, C>
-        where J: Clone + Send + 'static
+        where J: Clone + Send + Debug + 'static
     {
         Client {
             id: new_id,
