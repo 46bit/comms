@@ -2,7 +2,7 @@
 name = "comms"
 version = "0.1.1"
 dependencies = [
- "clippy 0.0.120 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clippy 0.0.121 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.11 (git+https://github.com/sirpent-team/futures-rs?branch=master2)",
  "quickcheck 0.2.27 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-timer 0.1.0 (git+https://github.com/sirpent-team/tokio-timer?branch=traits)",
@@ -28,16 +28,16 @@ dependencies = [
 
 [[package]]
 name = "clippy"
-version = "0.0.120"
+version = "0.0.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "cargo_metadata 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "clippy_lints 0.0.120 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clippy_lints 0.0.121 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "clippy_lints"
-version = "0.0.120"
+version = "0.0.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "matches 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -65,7 +65,7 @@ dependencies = [
 [[package]]
 name = "futures"
 version = "0.1.11"
-source = "git+https://github.com/sirpent-team/futures-rs?branch=master2#44f11da8cb1033e4c2fca69e3ce44f832df38770"
+source = "git+https://github.com/sirpent-team/futures-rs?branch=master2#ce51f6304c22e7fe1cb3a619afc57e3b9db18c8e"
 
 [[package]]
 name = "itoa"
@@ -296,8 +296,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [metadata]
 "checksum aho-corasick 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)" = "ca972c2ea5f742bfce5687b9aef75506a764f61d37f8f649047846a9686ddb66"
 "checksum cargo_metadata 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "34fdab49a2904acb112c83b62f0118de3de3ce28e52a9188dec2858e43878f25"
-"checksum clippy 0.0.120 (registry+https://github.com/rust-lang/crates.io-index)" = "b442c42e823fb8b70e4a9b6f801d3e4d521999a873d8bd7fb293a47243068783"
-"checksum clippy_lints 0.0.120 (registry+https://github.com/rust-lang/crates.io-index)" = "d428e3083a552a6608091220a6fa70224b067c43cb9898e7b64dc774b294c804"
+"checksum clippy 0.0.121 (registry+https://github.com/rust-lang/crates.io-index)" = "72c1d7d8ad4a41a722c0a09f747f085db980303e68b09dee2880231de4035c50"
+"checksum clippy_lints 0.0.121 (registry+https://github.com/rust-lang/crates.io-index)" = "83e1775d962387976aeae9f97f484e685dc92b05ed305bb62d5a9477722d9210"
 "checksum dtoa 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "80c8b71fd71146990a9742fc06dcbbde19161a267e0ad4e572c35162f4578c90"
 "checksum env_logger 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)" = "15abd780e45b3ea4f76b4e9a26ff4843258dd8a3eed2775a0e7368c2e7936c2f"
 "checksum futures 0.1.11 (git+https://github.com/sirpent-team/futures-rs?branch=master2)" = "<none>"

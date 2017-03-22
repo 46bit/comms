@@ -334,7 +334,7 @@ impl<I, T, R> Sink for Client<I, T, R>
 mod tests {
     use super::*;
     use super::test::*;
-    use futures::{executor, Future, Stream};
+    use futures::{lazy, executor, Future, Stream};
 
     #[test]
     fn can_join_room() {
@@ -414,6 +414,61 @@ mod tests {
                 }
             };
         }
+    }
+
+    #[test]
+    fn stream_and_sink_separate() {
+        let (rx, tx, mut c0) = mock_client("client1", 1);
+        let mut rx = rx.wait();
+
+        lazy(move || {
+            // With nothing to be sent and nothing to be received, the Stream should not be
+            // ready and the Sink should be empty.
+            assert_eq!(c0.poll(), Ok(Async::NotReady));
+            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+
+            // With a message to be received, the Stream should be ready and the Sink should
+            // be empty.
+            let msg = TinyMsg::A;
+            tx.clone().send(msg.clone()).wait().unwrap();
+            assert_eq!(c0.poll(), Ok(Async::Ready(Some(Some(msg)))));
+            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+
+            // With no message left to be received, the Stream should not be ready and the Sink
+            // should be empty.
+            assert_eq!(c0.poll(), Ok(Async::NotReady));
+            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+
+            // Start to send a message should not stall poll_complete and not affect Stream.
+            assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::Ready));
+            assert_eq!(c0.poll(), Ok(Async::NotReady));
+            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+
+            // Start to send a message should not stall poll_complete and not affect Stream.
+            assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::Ready));
+            assert_eq!(c0.poll(), Ok(Async::NotReady));
+            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+
+            // Backpressure causes no progress until some items read out.
+            assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::NotReady(TinyMsg::A)));
+            assert_eq!(c0.poll(), Ok(Async::NotReady));
+            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+            // Again.
+            assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::NotReady(TinyMsg::A)));
+            assert_eq!(c0.poll(), Ok(Async::NotReady));
+            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+
+            // With a message cleared, we can send another.
+            rx.next();
+            assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::Ready));
+            assert_eq!(c0.poll(), Ok(Async::NotReady));
+            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+
+            Ok::<(), ()>(())
+        }).wait().unwrap();
+
+        //rx.close();
+        //tx.close().unwrap();
     }
 
     #[test]
