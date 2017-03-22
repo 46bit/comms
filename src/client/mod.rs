@@ -7,22 +7,55 @@ use super::*;
 // @TODO: When breaking `Client` into separate futures, try defining:
 // type Connection = Result<Connection, Disconnection>;
 // N.B., Would need a better name for the type.
-struct ClientInner<T, R>
+pub struct ClientInner<T, R>
     where T: Sink + 'static,
           R: Stream + 'static
 {
     tx: T,
     rx: R,
-    sleep: Option<tokio_timer::Sleep>,
 }
 
 impl<T, R> Debug for ClientInner<T, R>
     where T: Sink + 'static,
-          R: Stream + 'static
+          R: Stream + 'static,
+          T::SinkError: Clone,
+          R::Error: Clone
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f,
                "ClientInner {{ tx: Sink, rx: Stream, sleep: tokio_timer::Sleep }}")
+    }
+}
+
+impl<T, R> Sink for ClientInner<T, R>
+    where T: Sink + 'static,
+          R: Stream + 'static,
+          T::SinkError: Clone,
+          R::Error: Clone
+{
+    type SinkItem = T::SinkItem;
+    type SinkError = T::SinkError;
+
+    fn start_send(&mut self, item: T::SinkItem) -> StartSend<T::SinkItem, T::SinkError> {
+        self.tx.start_send(item)
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), T::SinkError> {
+        self.tx.poll_complete()
+    }
+}
+
+impl<T, R> Stream for ClientInner<T, R>
+    where T: Sink + 'static,
+          R: Stream + 'static,
+          T::SinkError: Clone,
+          R::Error: Clone
+{
+    type Item = R::Item;
+    type Error = R::Error;
+
+    fn poll(&mut self) -> Poll<Option<R::Item>, R::Error> {
+        self.rx.poll()
     }
 }
 
@@ -35,38 +68,74 @@ impl<T, R> Debug for ClientInner<T, R>
 /// In addition this supports timeouts on receiving data. The `Timeout` enum
 /// allows specifying whether to have a timeout and whether the client should
 /// be disconnected should the timeout not be met.
-#[derive(Debug)]
-pub struct Client<I, T, R>
+pub struct Client<I, C>
     where I: Clone + Send + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
     id: I,
     timeout: Timeout,
-    inner: Result<ClientInner<T, R>, Disconnect<T::SinkError, R::Error>>,
+    sleep: Option<tokio_timer::Sleep>,
+    inner: Result<C, Disconnect<C::SinkError, C::Error>>,
 }
 
-impl<I, T, R> Client<I, T, R>
+// @TODO: Ask about a Debug `tokio_timer::Sleep`.
+impl<I, C> fmt::Debug for Client<I, C>
+    where I: Clone + Send + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
+{
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.debug_struct("Client")
+            .field("id", &self.id)
+            .field("timeout", &self.timeout)
+            .field("sleep", &"(not debug)".to_string())
+            .finish()
+    }
+}
+
+impl<I, T, R> Client<I, ClientInner<T, R>>
     where I: Clone + Send + 'static,
           T: Sink + 'static,
           R: Stream + 'static,
           T::SinkError: Clone,
           R::Error: Clone
 {
-    /// Create a new client.
+    /// Create a new client from separate `Sink` and `Stream`.
     ///
     /// Created from the ID, a timeout strategy, a `Sink` and a `Stream`.
-    pub fn new(id: I, timeout: Timeout, tx: T, rx: R) -> Client<I, T, R> {
+    pub fn new_from_split(id: I, timeout: Timeout, tx: T, rx: R) -> Client<I, ClientInner<T, R>> {
         Client {
             id: id,
             timeout: timeout,
-            inner: Ok(ClientInner {
-                tx: tx,
-                rx: rx,
-                sleep: None,
-            }),
+            sleep: None,
+            inner: Ok(ClientInner { tx: tx, rx: rx }),
+        }
+    }
+}
+
+impl<I, C> Client<I, C>
+    where I: Clone + Send + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
+{
+    /// Create a new client from a `Sink + Stream`.
+    ///
+    /// Created from the ID, a timeout strategy, and a `Sink + Stream`.
+    pub fn new<T, R>(id: I, timeout: Timeout, tx_rx: C) -> Client<I, C>
+        where T: Sink + 'static,
+              R: Stream + 'static,
+              T::SinkError: Clone,
+              R::Error: Clone
+    {
+        Client {
+            id: id,
+            timeout: timeout,
+            sleep: None,
+            inner: Ok(tx_rx),
         }
     }
 
@@ -76,12 +145,13 @@ impl<I, T, R> Client<I, T, R>
     }
 
     /// Change the client's ID. The new ID can be of a different type.
-    pub fn rename<J>(self, new_id: J) -> Client<J, T, R>
+    pub fn rename<J>(self, new_id: J) -> Client<J, C>
         where J: Clone + Send + 'static
     {
         Client {
             id: new_id,
             timeout: self.timeout,
+            sleep: self.sleep,
             inner: self.inner,
         }
     }
@@ -97,7 +167,7 @@ impl<I, T, R> Client<I, T, R>
     }
 
     /// Join a `Room` of clients with the same type.
-    pub fn join(self, room: &mut Room<I, T, R>) -> bool
+    pub fn join(self, room: &mut Room<I, C>) -> bool
         where I: PartialEq + Eq + Hash
     {
         room.insert(self)
@@ -118,14 +188,16 @@ impl<I, T, R> Client<I, T, R>
     ///     .map(|client| println!("sent hello to {}.", client.id()); ())
     ///     .map_err(|client| println!("sending hello to {} failed.", client.id()); ()));
     /// ```
-    pub fn transmit(self, msg: T::SinkItem) -> Box<Future<Item = Self, Error = Self>> {
+    pub fn transmit(mut self, msg: C::SinkItem) -> Box<Future<Item = Self, Error = Self>> {
         // N.B. This does ensure the inner is set, but it's a bit of a hack.
         let id = self.id();
         let timeout = self.timeout().clone();
+        let sleep = self.sleep.take();
         Box::new(self.send(msg).map_err(|e| {
             Client {
                 id: id,
                 timeout: timeout,
+                sleep: sleep,
                 inner: Err(e.clone()),
             }
         }))
@@ -139,7 +211,7 @@ impl<I, T, R> Client<I, T, R>
     /// If the Client is not disconnected, the Item value is a tuple `(Option<msg>, Client)`.
     /// The message option will only be `None` if the timeout was reached but its strategy
     /// specified keeping the Client connected.
-    pub fn receive(self) -> Box<Future<Item = (Option<R::Item>, Self), Error = Self>> {
+    pub fn receive(self) -> Box<Future<Item = (Option<C::Item>, Self), Error = Self>> {
         Box::new(self.into_future()
             .then(|result| match result {
                 Ok((Some(maybe_msg), client)) => future::ok((maybe_msg, client)),
@@ -154,7 +226,7 @@ impl<I, T, R> Client<I, T, R>
     ///
     /// If disconnected you can get the cause of disconnection with
     /// `client.status().is_gone().unwrap()`.
-    pub fn status(&self) -> Status<T::SinkError, R::Error> {
+    pub fn status(&self) -> Status<C::SinkError, C::Error> {
         if let Err(ref e) = self.inner {
             Status::Gone(e.clone())
         } else {
@@ -170,7 +242,7 @@ impl<I, T, R> Client<I, T, R>
     // It doesn't seem obviously possible to `executor::spawn().poll_future()`. There's an
     // `Unpark` argument to `poll_future` that we don't have a good value for.
     #[doc(hidden)]
-    pub fn update_status(self) -> Box<Future<Item = (Option<R::Item>, Self), Error = Self>> {
+    pub fn update_status(self) -> Box<Future<Item = (Option<C::Item>, Self), Error = Self>> {
         unimplemented!();
     }
 
@@ -186,20 +258,19 @@ impl<I, T, R> Client<I, T, R>
     }
 
     /// Retrieve the client ID and the current state of the connection.
-    pub fn into_inner(self) -> (I, Result<(T, R), Disconnect<T::SinkError, R::Error>>) {
-        (self.id, self.inner.map(|inner| (inner.tx, inner.rx)))
+    pub fn into_inner(self) -> (I, Result<C, Disconnect<C::SinkError, C::Error>>) {
+        (self.id, self.inner)
     }
 }
 
-impl<I, T, R> Stream for Client<I, T, R>
-    where I: Clone + Send + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Stream for Client<I, C>
+    where I: Clone + Send + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
-    type Item = Option<R::Item>;
-    type Error = Disconnect<T::SinkError, R::Error>;
+    type Item = Option<C::Item>;
+    type Error = Disconnect<C::SinkError, C::Error>;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         let inner_poll = {
@@ -210,22 +281,18 @@ impl<I, T, R> Stream for Client<I, T, R>
 
             // If there's a timeout specified, ensure we have a Sleep. Sleep will be instantiated
             // at the first poll after a value is yielded, indicating a new read is to take place.
-            if inner.sleep.is_none() {
-                inner.sleep = self.timeout.to_sleep();
+            if self.sleep.is_none() {
+                self.sleep = self.timeout.to_sleep();
             }
 
-            inner.rx.poll()
+            inner.poll()
         };
 
         match inner_poll {
             Ok(Async::NotReady) => {}
             // If an item is ready, discard the current Sleep and yield it.
             Ok(Async::Ready(Some(item))) => {
-                if let Ok(inner) = self.inner.as_mut() {
-                    inner.sleep = None;
-                } else {
-                    unreachable!();
-                }
+                self.sleep = None;
                 return Ok(Async::Ready(Some(Some(item))));
             }
             // If the stream has terminated, discard it. We record the Dropped state for the
@@ -243,23 +310,21 @@ impl<I, T, R> Stream for Client<I, T, R>
         }
 
         // A sleep should only be unavailable if the Timeout does not specify one.
-        let sleep_poll = {
-            match self.inner.as_mut() {
-                Ok(v) => {
-                    match v.sleep.as_mut() {
-                        Some(sleep) => sleep.poll(),
-                        None => return Ok(Async::NotReady),
-                    }
-                }
-                Err(_) => unreachable!(),
-            }
-        };
+        // We're polling an `Option<tokio_timer::Sleep>`. The `None` case will always
+        // give `Ok(Async::Ready(None))`.
+        let sleep_poll = self.sleep.poll();
         match sleep_poll {
             Ok(Async::NotReady) => Ok(Async::NotReady),
             // When the sleep yields, the timeout is up.
-            Ok(Async::Ready(_)) => {
+            Ok(Async::Ready(None)) => {
                 match self.timeout {
-                    // Even if changed between polls, it's handled by `sleep.is_some` above.
+                    Timeout::None => Ok(Async::NotReady),
+                    _ => unreachable!(),
+                }
+            }
+            Ok(Async::Ready(Some(_))) => {
+                match self.timeout {
+                    // If we poll a None, we'll Even if changed between polls, it's handled by `sleep.is_some` above.
                     Timeout::None => unreachable!(),
                     // If keeping alive, merely specify nothing arrived in time.
                     Timeout::KeepAliveAfter(..) => Ok(Async::Ready(Some(None))),
@@ -279,15 +344,14 @@ impl<I, T, R> Stream for Client<I, T, R>
     }
 }
 
-impl<I, T, R> Sink for Client<I, T, R>
-    where I: Clone + Send + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Sink for Client<I, C>
+    where I: Clone + Send + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
-    type SinkItem = T::SinkItem;
-    type SinkError = Disconnect<T::SinkError, R::Error>;
+    type SinkItem = C::SinkItem;
+    type SinkError = Disconnect<C::SinkError, C::Error>;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         let inner_start_send = {
@@ -296,7 +360,7 @@ impl<I, T, R> Sink for Client<I, T, R>
                 Ok(inner) => inner,
             };
 
-            inner.tx.start_send(item)
+            inner.start_send(item)
         };
 
         match inner_start_send {
@@ -316,7 +380,7 @@ impl<I, T, R> Sink for Client<I, T, R>
                 Ok(inner) => inner,
             };
 
-            inner.tx.poll_complete()
+            inner.poll_complete()
         };
 
         match inner_poll_complete {
@@ -422,50 +486,54 @@ mod tests {
         let mut rx = rx.wait();
 
         lazy(move || {
-            // With nothing to be sent and nothing to be received, the Stream should not be
-            // ready and the Sink should be empty.
-            assert_eq!(c0.poll(), Ok(Async::NotReady));
-            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+                // With nothing to be sent and nothing to be received, the Stream should not be
+                // ready and the Sink should be empty.
+                assert_eq!(c0.poll(), Ok(Async::NotReady));
+                assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
 
-            // With a message to be received, the Stream should be ready and the Sink should
-            // be empty.
-            let msg = TinyMsg::A;
-            tx.clone().send(msg.clone()).wait().unwrap();
-            assert_eq!(c0.poll(), Ok(Async::Ready(Some(Some(msg)))));
-            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+                // With a message to be received, the Stream should be ready and the Sink should
+                // be empty.
+                let msg = TinyMsg::A;
+                tx.clone().send(msg.clone()).wait().unwrap();
+                assert_eq!(c0.poll(), Ok(Async::Ready(Some(Some(msg)))));
+                assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
 
-            // With no message left to be received, the Stream should not be ready and the Sink
-            // should be empty.
-            assert_eq!(c0.poll(), Ok(Async::NotReady));
-            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+                // With no message left to be received, the Stream should not be ready and the Sink
+                // should be empty.
+                assert_eq!(c0.poll(), Ok(Async::NotReady));
+                assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
 
-            // Start to send a message should not stall poll_complete and not affect Stream.
-            assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::Ready));
-            assert_eq!(c0.poll(), Ok(Async::NotReady));
-            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+                // Start to send a message should not stall poll_complete and not affect Stream.
+                assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::Ready));
+                assert_eq!(c0.poll(), Ok(Async::NotReady));
+                assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
 
-            // Start to send a message should not stall poll_complete and not affect Stream.
-            assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::Ready));
-            assert_eq!(c0.poll(), Ok(Async::NotReady));
-            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+                // Start to send a message should not stall poll_complete and not affect Stream.
+                assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::Ready));
+                assert_eq!(c0.poll(), Ok(Async::NotReady));
+                assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
 
-            // Backpressure causes no progress until some items read out.
-            assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::NotReady(TinyMsg::A)));
-            assert_eq!(c0.poll(), Ok(Async::NotReady));
-            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
-            // Again.
-            assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::NotReady(TinyMsg::A)));
-            assert_eq!(c0.poll(), Ok(Async::NotReady));
-            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+                // Backpressure causes no progress until some items read out.
+                assert_eq!(c0.start_send(TinyMsg::A),
+                           Ok(AsyncSink::NotReady(TinyMsg::A)));
+                assert_eq!(c0.poll(), Ok(Async::NotReady));
+                assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+                // Again.
+                assert_eq!(c0.start_send(TinyMsg::A),
+                           Ok(AsyncSink::NotReady(TinyMsg::A)));
+                assert_eq!(c0.poll(), Ok(Async::NotReady));
+                assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
 
-            // With a message cleared, we can send another.
-            rx.next();
-            assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::Ready));
-            assert_eq!(c0.poll(), Ok(Async::NotReady));
-            assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
+                // With a message cleared, we can send another.
+                rx.next();
+                assert_eq!(c0.start_send(TinyMsg::A), Ok(AsyncSink::Ready));
+                assert_eq!(c0.poll(), Ok(Async::NotReady));
+                assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
 
-            Ok::<(), ()>(())
-        }).wait().unwrap();
+                Ok::<(), ()>(())
+            })
+            .wait()
+            .unwrap();
 
         //rx.close();
         //tx.close().unwrap();

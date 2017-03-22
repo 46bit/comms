@@ -2,26 +2,24 @@ use std::hash::Hash;
 use futures::{Future, Sink, Stream, Poll, Async, AsyncSink};
 use super::*;
 
-pub struct Transmit<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+pub struct Transmit<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
-    room: Option<Room<I, T, R>>,
-    start_send_list: Vec<(I, T::SinkItem)>,
+    room: Option<Room<I, C>>,
+    start_send_list: Vec<(I, C::SinkItem)>,
     poll_complete_list: Vec<I>,
 }
 
-impl<I, T, R> Transmit<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Transmit<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
-    pub fn new(room: Room<I, T, R>, msgs: Vec<(I, T::SinkItem)>) -> Transmit<I, T, R> {
+    pub fn new(room: Room<I, C>, msgs: Vec<(I, C::SinkItem)>) -> Transmit<I, C> {
         Transmit {
             room: Some(room),
             start_send_list: msgs,
@@ -29,19 +27,18 @@ impl<I, T, R> Transmit<I, T, R>
         }
     }
 
-    pub fn into_inner(mut self) -> Room<I, T, R> {
+    pub fn into_inner(mut self) -> Room<I, C> {
         self.room.take().unwrap()
     }
 }
 
-impl<I, T, R> Future for Transmit<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Future for Transmit<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
-    type Item = Room<I, T, R>;
+    type Item = Room<I, C>;
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {

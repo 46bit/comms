@@ -2,29 +2,27 @@ use std::hash::Hash;
 use futures::{Future, Sink, Stream, Poll, Async, AsyncSink};
 use super::*;
 
-pub struct Broadcast<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkItem: Clone,
-          T::SinkError: Clone,
-          R::Error: Clone
+pub struct Broadcast<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone,
+          C::SinkItem: Clone
 {
-    room: Option<Room<I, T, R>>,
-    msg: T::SinkItem,
+    room: Option<Room<I, C>>,
+    msg: C::SinkItem,
     start_send_list: Vec<I>,
     poll_complete_list: Vec<I>,
 }
 
-impl<I, T, R> Broadcast<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkItem: Clone,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Broadcast<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone,
+          C::SinkItem: Clone
 {
-    pub fn new(room: Room<I, T, R>, msg: T::SinkItem, ids: Vec<I>) -> Broadcast<I, T, R> {
+    pub fn new(room: Room<I, C>, msg: C::SinkItem, ids: Vec<I>) -> Broadcast<I, C> {
         Broadcast {
             room: Some(room),
             msg: msg,
@@ -33,20 +31,19 @@ impl<I, T, R> Broadcast<I, T, R>
         }
     }
 
-    pub fn into_inner(mut self) -> Room<I, T, R> {
+    pub fn into_inner(mut self) -> Room<I, C> {
         self.room.take().unwrap()
     }
 }
 
-impl<I, T, R> Future for Broadcast<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkItem: Clone,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Future for Broadcast<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone,
+          C::SinkItem: Clone
 {
-    type Item = Room<I, T, R>;
+    type Item = Room<I, C>;
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {

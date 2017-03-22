@@ -3,26 +3,24 @@ use std::collections::HashMap;
 use futures::{Future, Sink, Stream, Poll, Async};
 use super::*;
 
-pub struct Receive<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+pub struct Receive<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
-    room: Option<Room<I, T, R>>,
+    room: Option<Room<I, C>>,
     poll_list: Vec<I>,
-    replies: Vec<(I, R::Item)>,
+    replies: Vec<(I, C::Item)>,
 }
 
-impl<I, T, R> Receive<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Receive<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
-    pub fn new(room: Room<I, T, R>, ids: Vec<I>) -> Receive<I, T, R> {
+    pub fn new(room: Room<I, C>, ids: Vec<I>) -> Receive<I, C> {
         Receive {
             room: Some(room),
             poll_list: ids,
@@ -31,19 +29,18 @@ impl<I, T, R> Receive<I, T, R>
     }
 
     // @TODO: Return a struct so the present replies are labelled.
-    pub fn into_inner(mut self) -> (Room<I, T, R>, Vec<(I, R::Item)>) {
+    pub fn into_inner(mut self) -> (Room<I, C>, Vec<(I, C::Item)>) {
         (self.room.take().unwrap(), self.replies)
     }
 }
 
-impl<I, T, R> Future for Receive<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Future for Receive<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
-    type Item = (HashMap<I, R::Item>, Room<I, T, R>);
+    type Item = (HashMap<I, C::Item>, Room<I, C>);
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {

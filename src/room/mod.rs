@@ -20,32 +20,30 @@ use super::*;
 /// A room has a consistent timeout strategy for all contained clients. When a client
 /// is added the existing timeout strategy is overridden with that of the room. See
 /// `Client` and `Timeout` for more details.
-pub struct Room<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+pub struct Room<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
     timeout: Timeout,
-    ready_clients: HashMap<I, Client<I, T, R>>,
-    gone_clients: HashMap<I, Client<I, T, R>>,
+    ready_clients: HashMap<I, Client<I, C>>,
+    gone_clients: HashMap<I, Client<I, C>>,
     // Data for Sink
-    start_send_list: Vec<(I, T::SinkItem)>,
+    start_send_list: Vec<(I, C::SinkItem)>,
     poll_complete_list: HashSet<I>,
 }
 
-impl<I, T, R> Room<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Room<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
     /// Construct a new `Room` from a list of `Client`.
     ///
     /// N.B., construct an empty room with `Room::default()`.
-    pub fn new(clients: Vec<Client<I, T, R>>) -> Room<I, T, R> {
+    pub fn new(clients: Vec<Client<I, C>>) -> Room<I, C> {
         let mut room = Room::default();
         for client in clients {
             room.insert(client);
@@ -82,13 +80,13 @@ impl<I, T, R> Room<I, T, R>
     }
 
     #[doc(hidden)]
-    pub fn ready_client_mut(&mut self, id: &I) -> Option<&mut Client<I, T, R>> {
+    pub fn ready_client_mut(&mut self, id: &I) -> Option<&mut Client<I, C>> {
         self.ready_clients.get_mut(id)
     }
 
     // @TODO: Exists only for `Client::join`. When RFC1422 is stable, make this `pub(super)`.
     #[doc(hidden)]
-    pub fn insert(&mut self, mut client: Client<I, T, R>) -> bool {
+    pub fn insert(&mut self, mut client: Client<I, C>) -> bool {
         if self.contains(&client.id()) {
             return false;
         }
@@ -102,7 +100,7 @@ impl<I, T, R> Room<I, T, R>
     }
 
     /// Remove a client by ID.
-    pub fn remove(&mut self, id: &I) -> Option<Client<I, T, R>> {
+    pub fn remove(&mut self, id: &I) -> Option<Client<I, C>> {
         self.ready_clients.remove(id).or_else(|| self.gone_clients.remove(id))
     }
 
@@ -112,29 +110,29 @@ impl<I, T, R> Room<I, T, R>
     }
 
     /// Broadcast a single message to all connected clients.
-    pub fn broadcast_all(self, msg: T::SinkItem) -> Broadcast<I, T, R>
-        where T::SinkItem: Clone
+    pub fn broadcast_all(self, msg: C::SinkItem) -> Broadcast<I, C>
+        where C::SinkItem: Clone
     {
         let ids = self.ready_clients.keys().cloned().collect();
         Broadcast::new(self, msg, ids)
     }
 
     /// Broadcast a single message to particular connected clients.
-    pub fn broadcast(self, msg: T::SinkItem, ids: HashSet<I>) -> Broadcast<I, T, R>
-        where T::SinkItem: Clone
+    pub fn broadcast(self, msg: C::SinkItem, ids: HashSet<I>) -> Broadcast<I, C>
+        where C::SinkItem: Clone
     {
         Broadcast::new(self, msg, ids.into_iter().collect())
     }
 
     /// Send particular messages to particular connected clients.
-    pub fn transmit(self, msgs: HashMap<I, T::SinkItem>) -> Transmit<I, T, R> {
+    pub fn transmit(self, msgs: HashMap<I, C::SinkItem>) -> Transmit<I, C> {
         Transmit::new(self, msgs.into_iter().collect())
     }
 
     /// Try to receive a single message from all clients.
     ///
     /// This obeys the room's timeout strategy.
-    pub fn receive_all(self) -> Receive<I, T, R> {
+    pub fn receive_all(self) -> Receive<I, C> {
         let ids = self.ready_clients.keys().cloned().collect();
         Receive::new(self, ids)
     }
@@ -142,14 +140,14 @@ impl<I, T, R> Room<I, T, R>
     /// Try to receive a single message from particular clients.
     ///
     /// This obeys the room's timeout strategy.
-    pub fn receive(self, ids: HashSet<I>) -> Receive<I, T, R> {
+    pub fn receive(self, ids: HashSet<I>) -> Receive<I, C> {
         Receive::new(self, ids.into_iter().collect())
     }
 
     // @TODO: When client has a method to check its status against the internal rx/tx,
     // update this to use it (or make a new method to.)
     /// Get the status of all the clients.
-    pub fn statuses(&self) -> HashMap<I, Status<T::SinkError, R::Error>> {
+    pub fn statuses(&self) -> HashMap<I, Status<C::SinkError, C::Error>> {
         let rs = self.ready_clients.iter().map(|(id, client)| (id.clone(), client.status()));
         let gs = self.gone_clients.iter().map(|(id, client)| (id.clone(), client.status()));
         rs.chain(gs).collect()
@@ -175,19 +173,18 @@ impl<I, T, R> Room<I, T, R>
         self.gone_clients.shrink_to_fit();
     }
 
-    pub fn into_clients(self) -> (HashMap<I, Client<I, T, R>>, HashMap<I, Client<I, T, R>>) {
+    pub fn into_clients(self) -> (HashMap<I, Client<I, C>>, HashMap<I, Client<I, C>>) {
         (self.ready_clients, self.gone_clients)
     }
 }
 
-impl<I, T, R> Default for Room<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Default for Room<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
-    fn default() -> Room<I, T, R> {
+    fn default() -> Room<I, C> {
         Room {
             timeout: Timeout::None,
             ready_clients: HashMap::new(),
@@ -198,14 +195,13 @@ impl<I, T, R> Default for Room<I, T, R>
     }
 }
 
-impl<I, T, R> Sink for Room<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Sink for Room<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
-    type SinkItem = Vec<(I, T::SinkItem)>;
+    type SinkItem = Vec<(I, C::SinkItem)>;
     type SinkError = ();
 
     fn start_send(&mut self, msgs: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
@@ -253,14 +249,13 @@ impl<I, T, R> Sink for Room<I, T, R>
     }
 }
 
-impl<I, T, R> Stream for Room<I, T, R>
-    where I: Clone + Send + PartialEq + Eq + Hash + 'static,
-          T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+impl<I, C> Stream for Room<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
 {
-    type Item = Vec<(I, R::Item)>;
+    type Item = Vec<(I, C::Item)>;
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
@@ -272,7 +267,7 @@ impl<I, T, R> Stream for Room<I, T, R>
                     Ok(Async::NotReady) |
                     Ok(Async::Ready(Some(None))) |
                     Ok(Async::Ready(None)) |
-                    Err(_) => break
+                    Err(_) => break,
                 }
             }
         }
