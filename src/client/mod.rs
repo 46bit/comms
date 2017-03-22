@@ -1,6 +1,7 @@
 use std::hash::Hash;
 use std::fmt::{self, Debug};
 use futures::{future, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
+use futures::sync::mpsc;
 use tokio_timer;
 use super::*;
 
@@ -44,6 +45,12 @@ impl<I, T, R> Client<I, Unsplit<T, R>>
         }
     }
 }
+
+/// A client using mpsc channels.
+pub type MpscClient<I, M> = Client<I, Unsplit<mpsc::Sender<M>, mpsc::Receiver<M>>>;
+// @TODO: Adopting tokio-io feature flag could allow these handy types. Unsure if worthwhile.
+//pub type TokioClient<S, C> = Client<I, Framed<S, C>>;
+//pub type TokioTcpClient<C> = Client<I, Framed<TcpStream, C>>;
 
 impl<I, C> Client<I, C>
     where I: Clone + Send + Debug + 'static,
