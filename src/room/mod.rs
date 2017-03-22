@@ -268,11 +268,11 @@ impl<I, T, R> Stream for Room<I, T, R>
         for client in self.ready_clients.values_mut() {
             loop {
                 match client.poll() {
-                    Ok(Async::NotReady) => break,
                     Ok(Async::Ready(Some(Some(msg)))) => msgs.push((client.id(), msg)),
+                    Ok(Async::NotReady) |
                     Ok(Async::Ready(Some(None))) |
                     Ok(Async::Ready(None)) |
-                    Err(_) => {}
+                    Err(_) => break
                 }
             }
         }
