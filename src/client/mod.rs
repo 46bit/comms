@@ -4,61 +4,6 @@ use futures::{future, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use tokio_timer;
 use super::*;
 
-// @TODO: When breaking `Client` into separate futures, try defining:
-// type Connection = Result<Connection, Disconnection>;
-// N.B., Would need a better name for the type.
-pub struct ClientInner<T, R>
-    where T: Sink + 'static,
-          R: Stream + 'static
-{
-    tx: T,
-    rx: R,
-}
-
-impl<T, R> Debug for ClientInner<T, R>
-    where T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,
-               "ClientInner {{ tx: Sink, rx: Stream, sleep: tokio_timer::Sleep }}")
-    }
-}
-
-impl<T, R> Sink for ClientInner<T, R>
-    where T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
-{
-    type SinkItem = T::SinkItem;
-    type SinkError = T::SinkError;
-
-    fn start_send(&mut self, item: T::SinkItem) -> StartSend<T::SinkItem, T::SinkError> {
-        self.tx.start_send(item)
-    }
-
-    fn poll_complete(&mut self) -> Poll<(), T::SinkError> {
-        self.tx.poll_complete()
-    }
-}
-
-impl<T, R> Stream for ClientInner<T, R>
-    where T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
-{
-    type Item = R::Item;
-    type Error = R::Error;
-
-    fn poll(&mut self) -> Poll<Option<R::Item>, R::Error> {
-        self.rx.poll()
-    }
-}
-
 /// Handles communication with a single server client.
 ///
 /// This is the basic 'unit' around which `comms` is constructed. It handles
@@ -80,23 +25,7 @@ pub struct Client<I, C>
     inner: Result<C, Disconnect<C::SinkError, C::Error>>,
 }
 
-// @TODO: Ask about a Debug `tokio_timer::Sleep`.
-impl<I, C> fmt::Debug for Client<I, C>
-    where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
-{
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.debug_struct("Client")
-            .field("id", &self.id)
-            .field("timeout", &self.timeout)
-            .field("sleep", &"(not debug)".to_string())
-            .finish()
-    }
-}
-
-impl<I, T, R> Client<I, ClientInner<T, R>>
+impl<I, T, R> Client<I, Unsplit<T, R>>
     where I: Clone + Send + 'static,
           T: Sink + 'static,
           R: Stream + 'static,
@@ -106,12 +35,12 @@ impl<I, T, R> Client<I, ClientInner<T, R>>
     /// Create a new client from separate `Sink` and `Stream`.
     ///
     /// Created from the ID, a timeout strategy, a `Sink` and a `Stream`.
-    pub fn new_from_split(id: I, timeout: Timeout, tx: T, rx: R) -> Client<I, ClientInner<T, R>> {
+    pub fn new_from_split(id: I, timeout: Timeout, tx: T, rx: R) -> Client<I, Unsplit<T, R>> {
         Client {
             id: id,
             timeout: timeout,
             sleep: None,
-            inner: Ok(ClientInner { tx: tx, rx: rx }),
+            inner: Ok(Unsplit { tx: tx, rx: rx }),
         }
     }
 }
@@ -391,6 +320,77 @@ impl<I, C> Sink for Client<I, C>
                 Err(Disconnect::Sink(e))
             }
         }
+    }
+}
+
+// @TODO: Ask about a Debug `tokio_timer::Sleep`.
+impl<I, C> fmt::Debug for Client<I, C>
+    where I: Clone + Send + Debug + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
+{
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.debug_struct("Client")
+            .field("id", &self.id)
+            .field("timeout", &self.timeout)
+            .field("sleep", &"(not debug)".to_string())
+            .finish()
+    }
+}
+
+// @TODO: When breaking `Client` into separate futures, try defining:
+// type Connection = Result<Connection, Disconnection>;
+// N.B., Would need a better name for the type.
+pub struct Unsplit<T, R>
+    where T: Sink + 'static,
+          R: Stream + 'static
+{
+    tx: T,
+    rx: R,
+}
+
+impl<T, R> Debug for Unsplit<T, R>
+    where T: Sink + 'static,
+          R: Stream + 'static,
+          T::SinkError: Clone,
+          R::Error: Clone
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f,
+               "Unsplit {{ tx: Sink, rx: Stream, sleep: tokio_timer::Sleep }}")
+    }
+}
+
+impl<T, R> Sink for Unsplit<T, R>
+    where T: Sink + 'static,
+          R: Stream + 'static,
+          T::SinkError: Clone,
+          R::Error: Clone
+{
+    type SinkItem = T::SinkItem;
+    type SinkError = T::SinkError;
+
+    fn start_send(&mut self, item: T::SinkItem) -> StartSend<T::SinkItem, T::SinkError> {
+        self.tx.start_send(item)
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), T::SinkError> {
+        self.tx.poll_complete()
+    }
+}
+
+impl<T, R> Stream for Unsplit<T, R>
+    where T: Sink + 'static,
+          R: Stream + 'static,
+          T::SinkError: Clone,
+          R::Error: Clone
+{
+    type Item = R::Item;
+    type Error = R::Error;
+
+    fn poll(&mut self) -> Poll<Option<R::Item>, R::Error> {
+        self.rx.poll()
     }
 }
 

@@ -171,7 +171,7 @@ impl error::Error for IoErrorString {
 #[cfg(test)]
 mod test {
     use super::*;
-    use client::ClientInner;
+    use client::Unsplit;
     use std::sync::Arc;
     use futures::executor;
     use futures::sync::mpsc;
@@ -196,8 +196,7 @@ mod test {
                        buffer_size: usize)
                        -> (mpsc::Receiver<TinyMsg>,
                            mpsc::Sender<TinyMsg>,
-                           Client<String,
-                                  ClientInner<mpsc::Sender<TinyMsg>, mpsc::Receiver<TinyMsg>>>) {
+                           Client<String, Unsplit<mpsc::Sender<TinyMsg>, mpsc::Receiver<TinyMsg>>>) {
         let (tx, rx_from_client) = mpsc::channel(buffer_size);
         let (tx_to_client, rx) = mpsc::channel(buffer_size);
         let client = Client::new_from_split(id.to_string(), Timeout::None, tx, rx);
