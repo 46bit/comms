@@ -28,8 +28,8 @@ pub struct Room<I, C>
           C::SinkError: Clone,
           C::Error: Clone
 {
-    ready_clients: HashMap<I, Client<I, C>>,
-    gone_clients: HashMap<I, Client<I, C>>,
+    clients: HashMap<I, Client<I, C>>,
+    connected_ids: HashSet<I>,
 }
 
 impl<I, C> Room<I, C>
@@ -51,22 +51,22 @@ impl<I, C> Room<I, C>
 
     /// Get the IDs of all the clients.
     pub fn ids(&self) -> HashSet<I> {
-        &self.ready_ids() | &self.gone_ids()
+        self.clients.keys().cloned().collect()
     }
 
     /// Get the IDs of all connected clients.
-    pub fn ready_ids(&self) -> HashSet<I> {
-        self.ready_clients.keys().cloned().collect()
+    pub fn connected_ids(&self) -> HashSet<I> {
+        self.connected_ids.clone()
     }
 
     /// Get the IDs of all disconnected clients.
     pub fn gone_ids(&self) -> HashSet<I> {
-        self.gone_clients.keys().cloned().collect()
+        &self.ids() - &self.connected_ids()
     }
 
     #[doc(hidden)]
-    pub fn ready_client_mut(&mut self, id: &I) -> Option<&mut Client<I, C>> {
-        self.ready_clients.get_mut(id)
+    pub fn client_mut(&mut self, id: &I) -> Option<&mut Client<I, C>> {
+        self.clients.get_mut(id)
     }
 
     // @TODO: Exists only for `Client::join`. When RFC1422 is stable, make this `pub(super)`.
@@ -76,36 +76,35 @@ impl<I, C> Room<I, C>
             return false;
         }
         if client.status().is_connected() {
-            self.ready_clients.insert(client.id(), client);
-        } else {
-            self.gone_clients.insert(client.id(), client);
+            self.connected_ids.insert(client.id());
         }
+        self.clients.insert(client.id(), client);
         true
     }
 
     /// Remove a client by ID.
     pub fn remove(&mut self, id: &I) -> Option<Client<I, C>> {
-        self.ready_clients.remove(id).or_else(|| self.gone_clients.remove(id))
+        self.clients.remove(id)
     }
 
     /// Check is a client ID is present
     pub fn contains(&self, id: &I) -> bool {
-        self.ready_clients.contains_key(id) || self.gone_clients.contains_key(id)
+        self.clients.contains_key(id)
     }
 
     /// Broadcast a single message to all connected clients.
     pub fn broadcast_all(self, msg: C::SinkItem) -> Broadcast<I, C>
         where C::SinkItem: Clone
     {
-        let ids = self.ready_clients.keys().cloned().collect();
-        Broadcast::new(self, msg, ids)
+        let connected_ids = self.connected_ids();
+        Broadcast::new(self, msg, connected_ids)
     }
 
     /// Broadcast a single message to particular connected clients.
     pub fn broadcast(self, msg: C::SinkItem, ids: HashSet<I>) -> Broadcast<I, C>
         where C::SinkItem: Clone
     {
-        Broadcast::new(self, msg, ids.into_iter().collect())
+        Broadcast::new(self, msg, ids)
     }
 
     /// Send particular messages to particular connected clients.
@@ -115,8 +114,8 @@ impl<I, C> Room<I, C>
 
     /// Try to receive a single message from all clients.
     pub fn receive_all(self) -> Receive<I, C> {
-        let ids = self.ready_clients.keys().cloned().collect();
-        Receive::new(self, ids)
+        let connected_ids = self.connected_ids();
+        Receive::new(self, connected_ids)
     }
 
     /// Try to receive a single message from particular clients.
@@ -128,33 +127,28 @@ impl<I, C> Room<I, C>
     // update this to use it (or make a new method to.)
     /// Get the status of all the clients.
     pub fn statuses(&self) -> HashMap<I, Status<C::SinkError, C::Error>> {
-        let rs = self.ready_clients.iter().map(|(id, client)| (id.clone(), client.status()));
-        let gs = self.gone_clients.iter().map(|(id, client)| (id.clone(), client.status()));
-        rs.chain(gs).collect()
+        self.clients.iter().map(|(id, client)| (id.clone(), client.status())).collect()
     }
 
     /// Force disconnection of particular clients.
     pub fn close(&mut self, ids: HashSet<I>) {
         for id in ids {
-            let mut client = match self.ready_clients.remove(&id) {
+            let client = match self.client_mut(&id) {
                 Some(client) => client,
                 None => continue,
             };
             client.close();
-            self.gone_clients.insert(id, client);
         }
     }
 
     /// Disconnect all clients.
     pub fn close_all(&mut self) {
-        self.ready_clients.clear();
-        self.ready_clients.shrink_to_fit();
-        self.gone_clients.clear();
-        self.gone_clients.shrink_to_fit();
+        self.clients.clear();
+        self.clients.shrink_to_fit();
     }
 
-    pub fn into_clients(self) -> (HashMap<I, Client<I, C>>, HashMap<I, Client<I, C>>) {
-        (self.ready_clients, self.gone_clients)
+    pub fn into_clients(self) -> HashMap<I, Client<I, C>> {
+        self.clients
     }
 }
 
@@ -166,8 +160,8 @@ impl<I, C> Default for Room<I, C>
 {
     fn default() -> Room<I, C> {
         Room {
-            ready_clients: HashMap::new(),
-            gone_clients: HashMap::new(),
+            clients: HashMap::new(),
+            connected_ids: HashSet::new(),
         }
     }
 }
@@ -184,14 +178,8 @@ impl<I, C> Sink for Room<I, C>
     fn start_send(&mut self,
                   (id, msg): Self::SinkItem)
                   -> StartSend<Self::SinkItem, Self::SinkError> {
-        // Check if the client exists but is disconnected.
-        if let Some(gone_client) = self.gone_clients.get_mut(&id) {
-            let disconnect = gone_client.status().is_disconnected().unwrap().clone();
-            return Err(RoomError::DisconnectedClient(id, disconnect));
-        }
-
         // Check if the client is connected or (having also excluded disconnected) does not.
-        let client = match self.ready_client_mut(&id) {
+        let client = match self.client_mut(&id) {
             None => return Err(RoomError::UnknownClient(id)),
             Some(client) => client,
         };
@@ -204,11 +192,12 @@ impl<I, C> Sink for Room<I, C>
     }
 
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        for client in self.ready_clients.values_mut() {
+        for id in &self.connected_ids {
+            let client = self.clients.get_mut(id).unwrap();
             match client.poll_complete() {
                 Ok(Async::Ready(())) => {}
                 Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => return Err(RoomError::DisconnectedClient(client.id(), e)),
+                Err(e) => return Err(RoomError::DisconnectedClient(id.clone(), e)),
             }
         }
         Ok(Async::Ready(()))
@@ -225,7 +214,8 @@ impl<I, C> Stream for Room<I, C>
     type Error = (I, Disconnect<C::SinkError, C::Error>);
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        for client in self.ready_clients.values_mut() {
+        for id in &self.connected_ids {
+            let client = self.clients.get_mut(id).unwrap();
             match client.poll() {
                 Ok(Async::Ready(Some(msg))) => return Ok(Async::Ready(Some((client.id(), msg)))),
                 Ok(Async::Ready(None)) => return Err((client.id(), Disconnect::Dropped)),
@@ -294,7 +284,7 @@ mod tests {
                 assert_eq!(msgs, exp_msgs);
                 assert_eq!(room.statuses()
                                .into_iter()
-                               .map(|(id, status)| (id, status.is_ready()))
+                               .map(|(id, status)| (id, status.is_connected()))
                                .collect::<HashMap<_, _>>(),
                            vec![(id0, true), (id1, true)].into_iter().collect());
             }
@@ -309,7 +299,7 @@ mod tests {
 
         let mut room = Room::new(vec![client0, client1]);
         for (_, status) in room.statuses() {
-            assert!(status.is_ready());
+            assert!(status.is_connected());
         }
 
         let mut msgs = HashMap::new();
@@ -317,15 +307,15 @@ mod tests {
         room = room.transmit(msgs).wait().unwrap();
         for (id, status) in room.statuses() {
             if id == "client0".to_string() {
-                assert!(status.is_gone().is_some());
+                assert!(status.is_disconnected().is_some());
             } else {
-                assert!(status.is_ready());
+                assert!(status.is_connected());
             }
         }
 
         room = room.broadcast_all(TinyMsg::B("abc".to_string())).wait().unwrap();
         for (_, status) in room.statuses() {
-            assert!(status.is_gone().is_some());
+            assert!(status.is_disconnected().is_some());
         }
     }
 }

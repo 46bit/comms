@@ -1,5 +1,5 @@
 use std::hash::Hash;
-use std::collections::HashMap;
+use std::collections::{HashSet, HashMap};
 use futures::{Future, Sink, Stream, Poll, Async};
 use super::*;
 
@@ -10,7 +10,7 @@ pub struct Receive<I, C>
           C::Error: Clone
 {
     room: Option<Room<I, C>>,
-    poll_list: Vec<I>,
+    poll_list: HashSet<I>,
     replies: Vec<(I, C::Item)>,
 }
 
@@ -21,7 +21,7 @@ impl<I, C> Receive<I, C>
           C::Error: Clone
 {
     #[doc(hidden)]
-    pub fn new(room: Room<I, C>, ids: Vec<I>) -> Receive<I, C> {
+    pub fn new(room: Room<I, C>, ids: HashSet<I>) -> Receive<I, C> {
         Receive {
             room: Some(room),
             poll_list: ids,
@@ -47,14 +47,16 @@ impl<I, C> Future for Receive<I, C>
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let mut room = self.room.take().unwrap();
 
-        let poll_list = self.poll_list.drain(..).collect::<Vec<_>>();
+        let poll_list = self.poll_list.drain().collect::<Vec<_>>();
         for id in poll_list {
-            let ready_client = match room.ready_client_mut(&id) {
+            let ready_client = match room.client_mut(&id) {
                 Some(ready_client) => ready_client,
                 None => continue,
             };
             match ready_client.poll() {
-                Ok(Async::NotReady) => self.poll_list.push(id),
+                Ok(Async::NotReady) => {
+                    self.poll_list.insert(id);
+                }
                 Ok(Async::Ready(Some(msg))) => self.replies.push((id, msg)),
                 Ok(Async::Ready(None)) |
                 Err(_) => {}

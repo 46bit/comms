@@ -28,8 +28,8 @@ impl<I, C> Transmit<I, C>
         }
     }
 
-    pub fn into_inner(mut self) -> Room<I, C> {
-        self.room.take().unwrap()
+    pub fn into_inner(mut self) -> Option<Room<I, C>> {
+        self.room.take()
     }
 }
 
@@ -47,7 +47,7 @@ impl<I, C> Future for Transmit<I, C>
 
         let start_send_list = self.start_send_list.drain(..).collect::<Vec<_>>();
         for (id, msg) in start_send_list {
-            let ready_client = match room.ready_client_mut(&id) {
+            let ready_client = match room.client_mut(&id) {
                 Some(ready_client) => ready_client,
                 None => continue,
             };
@@ -60,7 +60,7 @@ impl<I, C> Future for Transmit<I, C>
 
         let poll_complete_list = self.poll_complete_list.drain(..).collect::<Vec<_>>();
         for id in poll_complete_list {
-            let ready_client = match room.ready_client_mut(&id) {
+            let ready_client = match room.client_mut(&id) {
                 Some(ready_client) => ready_client,
                 None => continue,
             };

@@ -1,4 +1,5 @@
 use std::hash::Hash;
+use std::collections::HashSet;
 use futures::{Future, Sink, Stream, Poll, Async, AsyncSink};
 use super::*;
 
@@ -11,7 +12,7 @@ pub struct Broadcast<I, C>
 {
     room: Option<Room<I, C>>,
     msg: C::SinkItem,
-    start_send_list: Vec<I>,
+    start_send_list: HashSet<I>,
     poll_complete_list: Vec<I>,
 }
 
@@ -23,7 +24,7 @@ impl<I, C> Broadcast<I, C>
           C::SinkItem: Clone
 {
     #[doc(hidden)]
-    pub fn new(room: Room<I, C>, msg: C::SinkItem, ids: Vec<I>) -> Broadcast<I, C> {
+    pub fn new(room: Room<I, C>, msg: C::SinkItem, ids: HashSet<I>) -> Broadcast<I, C> {
         Broadcast {
             room: Some(room),
             msg: msg,
@@ -50,15 +51,15 @@ impl<I, C> Future for Broadcast<I, C>
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let mut room = self.room.take().unwrap();
 
-        let start_send_list = self.start_send_list.drain(..).collect::<Vec<_>>();
+        let start_send_list = self.start_send_list.drain().collect::<Vec<_>>();
         for id in start_send_list {
-            let ready_client = match room.ready_client_mut(&id) {
+            let ready_client = match room.client_mut(&id) {
                 Some(ready_client) => ready_client,
                 None => continue,
             };
             match ready_client.start_send(self.msg.clone()) {
                 Ok(AsyncSink::NotReady(_)) => {
-                    self.start_send_list.push(id);
+                    self.start_send_list.insert(id);
                 }
                 Ok(AsyncSink::Ready) => {
                     self.poll_complete_list.push(id);
@@ -69,7 +70,7 @@ impl<I, C> Future for Broadcast<I, C>
 
         let poll_complete_list = self.poll_complete_list.drain(..).collect::<Vec<_>>();
         for id in poll_complete_list {
-            let ready_client = match room.ready_client_mut(&id) {
+            let ready_client = match room.client_mut(&id) {
                 Some(ready_client) => ready_client,
                 None => continue,
             };

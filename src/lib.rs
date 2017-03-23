@@ -132,7 +132,7 @@ mod test {
          -> (mpsc::Receiver<TinyMsg>, mpsc::Sender<TinyMsg>, MpscClient<String, TinyMsg>) {
         let (tx, rx_from_client) = mpsc::channel(buffer_size);
         let (tx_to_client, rx) = mpsc::channel(buffer_size);
-        let client = Client::new_from_split(id.to_string(), Timeout::None, tx, rx);
+        let client = Client::new_from_split(id.to_string(), tx, rx);
         (rx_from_client, tx_to_client, client)
     }
 }

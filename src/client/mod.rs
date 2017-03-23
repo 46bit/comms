@@ -146,10 +146,10 @@ impl<I, C> Client<I, C>
 
     /// Get the current status of this Client.
     ///
-    /// Check whether a Client is connected with `client.status().is_ready()`.
+    /// Check whether a Client is connected with `client.status().is_connected()`.
     ///
     /// If disconnected you can get the cause of disconnection with
-    /// `client.status().is_gone().unwrap()`.
+    /// `client.status().is_disconnected().unwrap()`.
     pub fn status(&self) -> Status<C::SinkError, C::Error> {
         if let Err(ref e) = self.inner {
             Status::Disconnected(e.clone())
@@ -405,10 +405,10 @@ mod tests {
             tx_to_client = tx_to_client.send(msg.clone()).wait().unwrap();
 
             match future.wait_future() {
-                Ok((maybe_msg, client_new)) => {
+                Ok((msg, client_new)) => {
                     client = client_new;
                     assert_eq!("client1", client.id());
-                    assert_eq!(msg, maybe_msg.unwrap());
+                    assert_eq!(msg, msg);
                 }
                 _ => {
                     unreachable!();
@@ -432,7 +432,7 @@ mod tests {
                 // be empty.
                 let msg = TinyMsg::A;
                 tx.clone().send(msg.clone()).wait().unwrap();
-                assert_eq!(c0.poll(), Ok(Async::Ready(Some(Some(msg)))));
+                assert_eq!(c0.poll(), Ok(Async::Ready(Some(msg))));
                 assert_eq!(c0.poll_complete(), Ok(Async::Ready(())));
 
                 // With no message left to be received, the Stream should not be ready and the Sink
@@ -481,34 +481,34 @@ mod tests {
         let msg = TinyMsg::B("ABC".to_string());
 
         let (mut rx_from_client, _, client) = mock_client("client1", 1);
-        assert!(client.status().is_ready());
+        assert!(client.status().is_connected());
         // Check unfortunate edgecase that a closed channel is not noticed until the next
         // IO action.
         let _ = rx_from_client.close();
-        assert!(client.status().is_ready());
+        assert!(client.status().is_connected());
 
         let (_, mut tx_to_client, client) = mock_client("client2", 1);
-        assert!(client.status().is_ready());
+        assert!(client.status().is_connected());
         let _ = tx_to_client.close();
         // Check unfortunate edgecase that a closed channel is not noticed until the next
         // IO action.
-        assert!(client.status().is_ready());
+        assert!(client.status().is_connected());
 
         // Assert that status with dropped channels indicates the client is gone.
         let (_, _, client) = mock_client("client2", 1);
-        assert!(client.status().is_ready());
+        assert!(client.status().is_connected());
         match client.transmit(msg.clone()).wait() {
             Ok(_) => unreachable!(),
-            Err(client) => assert!(client.status().is_gone().is_some()),
+            Err(client) => assert!(client.status().is_disconnected().is_some()),
         };
     }
 
     #[test]
     fn can_close() {
         let (_, _, mut client) = mock_client("client1", 1);
-        assert!(client.status().is_ready());
+        assert!(client.status().is_connected());
         client.close();
-        assert!(client.status().is_gone().is_some());
+        assert!(client.status().is_disconnected().is_some());
         // @TODO: Check channels are gone.
     }
 }
