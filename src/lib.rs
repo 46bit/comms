@@ -34,15 +34,15 @@ pub enum Disconnect<T, R> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Status<T, R> {
     /// The Client appears to be connected.
-    Ready,
+    Connected,
     /// The client is disconnected (and the `Disconnect` explaining why).
-    Gone(Disconnect<T, R>),
+    Disconnected(Disconnect<T, R>),
 }
 
 impl<T, R> Status<T, R> {
     /// Is the client connected?
-    pub fn is_ready(&self) -> bool {
-        if let Status::Ready = *self {
+    pub fn is_connected(&self) -> bool {
+        if let Status::Connected = *self {
             true
         } else {
             false
@@ -50,8 +50,8 @@ impl<T, R> Status<T, R> {
     }
 
     /// Is the client disconnected.
-    pub fn is_gone(&self) -> Option<&Disconnect<T, R>> {
-        if let Status::Gone(ref e) = *self {
+    pub fn is_disconnected(&self) -> Option<&Disconnect<T, R>> {
+        if let Status::Disconnected(ref e) = *self {
             Some(e)
         } else {
             None

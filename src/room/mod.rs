@@ -75,7 +75,7 @@ impl<I, C> Room<I, C>
         if self.contains(&client.id()) {
             return false;
         }
-        if client.status().is_ready() {
+        if client.status().is_connected() {
             self.ready_clients.insert(client.id(), client);
         } else {
             self.gone_clients.insert(client.id(), client);
@@ -186,7 +186,7 @@ impl<I, C> Sink for Room<I, C>
                   -> StartSend<Self::SinkItem, Self::SinkError> {
         // Check if the client exists but is disconnected.
         if let Some(gone_client) = self.gone_clients.get_mut(&id) {
-            let disconnect = gone_client.status().is_gone().unwrap().clone();
+            let disconnect = gone_client.status().is_disconnected().unwrap().clone();
             return Err(RoomError::DisconnectedClient(id, disconnect));
         }
 

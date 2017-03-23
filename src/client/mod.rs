@@ -152,9 +152,9 @@ impl<I, C> Client<I, C>
     /// `client.status().is_gone().unwrap()`.
     pub fn status(&self) -> Status<C::SinkError, C::Error> {
         if let Err(ref e) = self.inner {
-            Status::Gone(e.clone())
+            Status::Disconnected(e.clone())
         } else {
-            Status::Ready
+            Status::Connected
         }
     }
 
