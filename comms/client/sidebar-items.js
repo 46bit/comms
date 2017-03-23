@@ -1,1 +1,1 @@
-initSidebarItems({"struct":[["Client","Handles communication with a single server client."],["Unsplit",""]],"type":[["MpscClient","A client using mpsc channels."]]});
+initSidebarItems({"struct":[["Client","Handles communication with a single server client."],["Receive",""],["ReceiveWithHardTimeout",""],["ReceiveWithSoftTimeout",""],["Unsplit",""]],"type":[["MpscClient","A client using mpsc channels."]]});

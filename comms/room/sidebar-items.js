@@ -1,1 +1,1 @@
-initSidebarItems({"struct":[["Broadcast",""],["Receive",""],["Room","Handles connection with multiple server clients."],["Transmit",""],["Transmit",""]]});
+initSidebarItems({"enum":[["RoomError",""]],"struct":[["Broadcast",""],["Receive",""],["Room","Handles connection with multiple server clients."],["Transmit",""],["Transmit",""]]});
