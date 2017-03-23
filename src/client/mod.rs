@@ -1,6 +1,9 @@
+mod receive;
+pub use self::receive::*;
+
 use std::hash::Hash;
 use std::fmt::{self, Debug};
-use futures::{future, Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
+use futures::{Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use futures::sync::mpsc;
 use futures::stream::{FromErr, SplitStream, SplitSink};
 use futures::sink::SinkFromErr;
@@ -16,6 +19,7 @@ use super::*;
 /// In addition this supports timeouts on receiving data. The `Timeout` enum
 /// allows specifying whether to have a timeout and whether the client should
 /// be disconnected should the timeout not be met.
+#[derive(Debug)]
 pub struct Client<I, C>
     where I: Clone + Send + Debug + 'static,
           C: Sink + Stream + 'static,
@@ -23,8 +27,6 @@ pub struct Client<I, C>
           C::Error: Clone
 {
     id: I,
-    timeout: Timeout,
-    sleep: Option<tokio_timer::Sleep>,
     inner: Result<C, Disconnect<C::SinkError, C::Error>>,
 }
 
@@ -37,9 +39,9 @@ impl<I, T, R> Client<I, Unsplit<T, R>>
 {
     /// Create a new client from separate `Sink` and `Stream`.
     ///
-    /// Created from the ID, a timeout strategy, a `Sink` and a `Stream`.
-    pub fn new_from_split(id: I, timeout: Timeout, tx: T, rx: R) -> Client<I, Unsplit<T, R>> {
-        Client::new(id, timeout, Unsplit { tx: tx, rx: rx })
+    /// Created from the ID, a `Sink` and a `Stream`.
+    pub fn new_from_split(id: I, tx: T, rx: R) -> Client<I, Unsplit<T, R>> {
+        Client::new(id, Unsplit { tx: tx, rx: rx })
     }
 }
 
@@ -58,13 +60,12 @@ impl<I, C> Client<I,
     ///         let client = Client::new_from_io(Uuid::new_v4(), ClientTimeout::None, socket.framed(MsgCodec));
     /// ```
     pub fn new_from_io(id: I,
-                       timeout: Timeout,
                        tx_rx: C)
                        -> Client<I,
                                  Unsplit<SinkFromErr<SplitSink<C>, ErrorString>,
                                          FromErr<SplitStream<C>, ErrorString>>> {
         let (tx, rx) = tx_rx.split();
-        Client::new_from_split(id, timeout, tx.sink_from_err(), rx.from_err())
+        Client::new_from_split(id, tx.sink_from_err(), rx.from_err())
     }
 }
 
@@ -83,11 +84,9 @@ impl<I, C> Client<I, C>
     /// Create a new client from a `Sink + Stream`.
     ///
     /// Created from the ID, a timeout strategy, and a `Sink + Stream`.
-    pub fn new(id: I, timeout: Timeout, tx_rx: C) -> Client<I, C> {
+    pub fn new(id: I, tx_rx: C) -> Client<I, C> {
         Client {
             id: id,
-            timeout: timeout,
-            sleep: None,
             inner: Ok(tx_rx),
         }
     }
@@ -103,20 +102,8 @@ impl<I, C> Client<I, C>
     {
         Client {
             id: new_id,
-            timeout: self.timeout,
-            sleep: self.sleep,
             inner: self.inner,
         }
-    }
-
-    /// Get the current timeout strategy in use.
-    pub fn timeout(&self) -> &Timeout {
-        &self.timeout
-    }
-
-    /// Change the timeout strategy in use.
-    pub fn set_timeout(&mut self, timeout: Timeout) {
-        self.timeout = timeout;
     }
 
     /// Join a `Room` of clients with the same type.
@@ -141,36 +128,20 @@ impl<I, C> Client<I, C>
     ///     .map(|client| println!("sent hello to {}.", client.id()); ())
     ///     .map_err(|client| println!("sending hello to {} failed.", client.id()); ()));
     /// ```
-    pub fn transmit(mut self, msg: C::SinkItem) -> Box<Future<Item = Self, Error = Self>> {
+    pub fn transmit(self, msg: C::SinkItem) -> Box<Future<Item = Self, Error = Self>> {
         // N.B. This does ensure the inner is set, but it's a bit of a hack.
         let id = self.id();
-        let timeout = self.timeout().clone();
-        let sleep = self.sleep.take();
         Box::new(self.send(msg).map_err(|e| {
             Client {
                 id: id,
-                timeout: timeout,
-                sleep: sleep,
                 inner: Err(e.clone()),
             }
         }))
     }
 
     /// Future that tries to receive a single message.
-    ///
-    /// If the Client is disconnected (whether because the connection dropped or because
-    /// of the current timeout strategy) the Error value is a Client.
-    ///
-    /// If the Client is not disconnected, the Item value is a tuple `(Option<msg>, Client)`.
-    /// The message option will only be `None` if the timeout was reached but its strategy
-    /// specified keeping the Client connected.
-    pub fn receive(self) -> Box<Future<Item = (Option<C::Item>, Self), Error = Self>> {
-        Box::new(self.into_future()
-            .then(|result| match result {
-                Ok((Some(maybe_msg), client)) => future::ok((maybe_msg, client)),
-                Ok((None, client)) |
-                Err((_, client)) => future::err(client),
-            }))
+    pub fn receive(self) -> Receive<I, C> {
+        Receive::new(self)
     }
 
     /// Get the current status of this Client.
@@ -222,7 +193,7 @@ impl<I, C> Stream for Client<I, C>
           C::SinkError: Clone,
           C::Error: Clone
 {
-    type Item = Option<C::Item>;
+    type Item = C::Item;
     type Error = Disconnect<C::SinkError, C::Error>;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
@@ -232,67 +203,25 @@ impl<I, C> Stream for Client<I, C>
                 Ok(inner) => inner,
             };
 
-            // If there's a timeout specified, ensure we have a Sleep. Sleep will be instantiated
-            // at the first poll after a value is yielded, indicating a new read is to take place.
-            if self.sleep.is_none() {
-                self.sleep = self.timeout.to_sleep();
-            }
-
             inner.poll()
         };
 
         match inner_poll {
-            Ok(Async::NotReady) => {}
+            Ok(Async::NotReady) => Ok(Async::NotReady),
             // If an item is ready, discard the current Sleep and yield it.
-            Ok(Async::Ready(Some(item))) => {
-                self.sleep = None;
-                return Ok(Async::Ready(Some(Some(item))));
-            }
+            Ok(Async::Ready(Some(item))) => Ok(Async::Ready(Some(item))),
             // If the stream has terminated, discard it. We record the Dropped state for the
             // benefit of Status calls, and pass on the stream termination.
             Ok(Async::Ready(None)) => {
                 self.inner = Err(Disconnect::Dropped);
-                return Ok(Async::Ready(None));
+                Ok(Async::Ready(None))
             }
             // If the stream yields an error we discard it. This is a limitation vs the
             // current stream error model but it simplifies an already complex model.
             Err(e) => {
                 self.inner = Err(Disconnect::Stream(e.clone()));
-                return Err(Disconnect::Stream(e));
+                Err(Disconnect::Stream(e))
             }
-        }
-
-        // A sleep should only be unavailable if the Timeout does not specify one.
-        // We're polling an `Option<tokio_timer::Sleep>`. The `None` case will always
-        // give `Ok(Async::Ready(None))`.
-        let sleep_poll = self.sleep.poll();
-        match sleep_poll {
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            // When the sleep yields, the timeout is up.
-            Ok(Async::Ready(None)) => {
-                match self.timeout {
-                    Timeout::None => Ok(Async::NotReady),
-                    _ => unreachable!(),
-                }
-            }
-            Ok(Async::Ready(Some(_))) => {
-                match self.timeout {
-                    // If we poll a None, we'll Even if changed between polls, it's handled by `sleep.is_some` above.
-                    Timeout::None => unreachable!(),
-                    // If keeping alive, merely specify nothing arrived in time.
-                    Timeout::KeepAliveAfter(..) => Ok(Async::Ready(Some(None))),
-                    // If disconnecting, discard the stream. What to do here is complex.
-                    // Yielding a `Err(Disconnect::Timeout)` is more consistent with
-                    // matters elsewhere, but the stream model doesn't consider that to
-                    // indicate termination. Thus yield for stream termination.
-                    Timeout::DisconnectAfter(..) => {
-                        self.inner = Err(Disconnect::Timeout);
-                        Ok(Async::Ready(None))
-                    }
-                }
-            }
-            // If the timer errored we simply pass that through.
-            Err(e) => Err(Disconnect::Timer(e)),
         }
     }
 }
@@ -344,22 +273,6 @@ impl<I, C> Sink for Client<I, C>
                 Err(Disconnect::Sink(e))
             }
         }
-    }
-}
-
-// @TODO: Ask about a Debug `tokio_timer::Sleep`.
-impl<I, C> fmt::Debug for Client<I, C>
-    where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
-{
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.debug_struct("Client")
-            .field("id", &self.id)
-            .field("timeout", &self.timeout)
-            .field("sleep", &"(not debug)".to_string())
-            .finish()
     }
 }
 

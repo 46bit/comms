@@ -12,7 +12,6 @@ pub use self::room::Room;
 use std::io;
 use std::error;
 use std::fmt::{self, Debug};
-use std::time::Duration;
 
 /// Possible causes for a disconnection.
 #[derive(Clone, Debug, PartialEq)]
@@ -56,71 +55,6 @@ impl<T, R> Status<T, R> {
             Some(e)
         } else {
             None
-        }
-    }
-}
-
-/// Strategies for timeouts.
-#[derive(Clone)]
-pub enum Timeout {
-    /// Don't time out.
-    None,
-    /// If a client misses the timeout, keep it connected.
-    KeepAliveAfter(Duration, tokio_timer::Timer),
-    /// If a client misses the timeout, disconnect it.
-    DisconnectAfter(Duration, tokio_timer::Timer),
-}
-
-impl Debug for Timeout {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use Timeout::*;
-        match *self {
-            None => write!(f, "Timeout::None"),
-            KeepAliveAfter(d, _) => {
-                write!(f, "Timeout::KeepAliveAfter({:?}, tokio_timer::Timer)", d)
-            }
-            DisconnectAfter(d, _) => {
-                write!(f, "Timeout::DisconnectAfter({:?}, tokio_timer::Timer)", d)
-            }
-        }
-    }
-}
-
-impl Timeout {
-    /// Construct a new `Timeout` from an `Option<Duration>`, where
-    /// if a client misses the timeout, keep it connected.
-    ///
-    /// `Some(duration)` becomes `Timeout::KeepAliveAfter`.
-    /// `None` becomes `Timeout::None`.
-    pub fn keep_alive_after(maybe_duration: Option<Duration>,
-                            timer: tokio_timer::Timer)
-                            -> Timeout {
-        match maybe_duration {
-            Some(duration) => Timeout::KeepAliveAfter(duration, timer),
-            None => Timeout::None,
-        }
-    }
-
-    /// Construct a new `Timeout` from an `Option<Duration>`, where
-    /// if a client misses the timeout, disconnect it.
-    ///
-    /// `Some(duration)` becomes `Timeout::DisconnectAfter`.
-    /// `None` becomes `Timeout::None`.
-    pub fn disconnect_after(maybe_duration: Option<Duration>,
-                            timer: tokio_timer::Timer)
-                            -> Timeout {
-        match maybe_duration {
-            Some(duration) => Timeout::DisconnectAfter(duration, timer),
-            None => Timeout::None,
-        }
-    }
-
-    #[doc(hidden)]
-    pub fn to_sleep(&self) -> Option<tokio_timer::Sleep> {
-        match *self {
-            Timeout::None => None,
-            Timeout::KeepAliveAfter(duration, ref timer) |
-            Timeout::DisconnectAfter(duration, ref timer) => Some(timer.sleep(duration)),
         }
     }
 }

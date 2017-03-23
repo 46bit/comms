@@ -20,6 +20,7 @@ impl<I, C> Receive<I, C>
           C::SinkError: Clone,
           C::Error: Clone
 {
+    #[doc(hidden)]
     pub fn new(room: Room<I, C>, ids: Vec<I>) -> Receive<I, C> {
         Receive {
             room: Some(room),
@@ -54,8 +55,7 @@ impl<I, C> Future for Receive<I, C>
             };
             match ready_client.poll() {
                 Ok(Async::NotReady) => self.poll_list.push(id),
-                Ok(Async::Ready(Some(Some(msg)))) => self.replies.push((id, msg)),
-                Ok(Async::Ready(Some(None))) |
+                Ok(Async::Ready(Some(msg))) => self.replies.push((id, msg)),
                 Ok(Async::Ready(None)) |
                 Err(_) => {}
             }

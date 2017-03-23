@@ -22,6 +22,7 @@ impl<I, C> Broadcast<I, C>
           C::Error: Clone,
           C::SinkItem: Clone
 {
+    #[doc(hidden)]
     pub fn new(room: Room<I, C>, msg: C::SinkItem, ids: Vec<I>) -> Broadcast<I, C> {
         Broadcast {
             room: Some(room),

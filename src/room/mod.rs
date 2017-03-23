@@ -16,17 +16,12 @@ use super::*;
 ///
 /// It value-adds a lot of consistency by being a well-developed group of clients.
 /// In my applications it's being immensely helpful to factor out this logic to here.
-///
-/// A room has a consistent timeout strategy for all contained clients. When a client
-/// is added the existing timeout strategy is overridden with that of the room. See
-/// `Client` and `Timeout` for more details.
 pub struct Room<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
           C: Sink + Stream + 'static,
           C::SinkError: Clone,
           C::Error: Clone
 {
-    timeout: Timeout,
     ready_clients: HashMap<I, Client<I, C>>,
     gone_clients: HashMap<I, Client<I, C>>,
     // Data for Sink
@@ -51,19 +46,6 @@ impl<I, C> Room<I, C>
         room
     }
 
-    /// Get the current timeout strategy in use by these clients.
-    pub fn timeout(&self) -> &Timeout {
-        &self.timeout
-    }
-
-    /// Change the current timeout strategy in use by these clients.
-    pub fn set_timeout(&mut self, timeout: Timeout) {
-        for client in self.ready_clients.values_mut() {
-            client.set_timeout(timeout.clone());
-        }
-        self.timeout = timeout;
-    }
-
     /// Get the IDs of all the clients.
     pub fn ids(&self) -> HashSet<I> {
         &self.ready_ids() | &self.gone_ids()
@@ -86,11 +68,10 @@ impl<I, C> Room<I, C>
 
     // @TODO: Exists only for `Client::join`. When RFC1422 is stable, make this `pub(super)`.
     #[doc(hidden)]
-    pub fn insert(&mut self, mut client: Client<I, C>) -> bool {
+    pub fn insert(&mut self, client: Client<I, C>) -> bool {
         if self.contains(&client.id()) {
             return false;
         }
-        client.set_timeout(self.timeout.clone());
         if client.status().is_ready() {
             self.ready_clients.insert(client.id(), client);
         } else {
@@ -130,16 +111,12 @@ impl<I, C> Room<I, C>
     }
 
     /// Try to receive a single message from all clients.
-    ///
-    /// This obeys the room's timeout strategy.
     pub fn receive_all(self) -> Receive<I, C> {
         let ids = self.ready_clients.keys().cloned().collect();
         Receive::new(self, ids)
     }
 
     /// Try to receive a single message from particular clients.
-    ///
-    /// This obeys the room's timeout strategy.
     pub fn receive(self, ids: HashSet<I>) -> Receive<I, C> {
         Receive::new(self, ids.into_iter().collect())
     }
@@ -186,7 +163,6 @@ impl<I, C> Default for Room<I, C>
 {
     fn default() -> Room<I, C> {
         Room {
-            timeout: Timeout::None,
             ready_clients: HashMap::new(),
             gone_clients: HashMap::new(),
             start_send_list: vec![],
@@ -255,28 +231,20 @@ impl<I, C> Stream for Room<I, C>
           C::SinkError: Clone,
           C::Error: Clone
 {
-    type Item = Vec<(I, C::Item)>;
-    type Error = ();
+    type Item = (I, C::Item);
+    type Error = (I, Disconnect<C::SinkError, C::Error>);
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        let mut msgs = vec![];
         for client in self.ready_clients.values_mut() {
-            loop {
-                match client.poll() {
-                    Ok(Async::Ready(Some(Some(msg)))) => msgs.push((client.id(), msg)),
-                    Ok(Async::NotReady) |
-                    Ok(Async::Ready(Some(None))) |
-                    Ok(Async::Ready(None)) |
-                    Err(_) => break,
-                }
+            match client.poll() {
+                Ok(Async::Ready(Some(msg))) => return Ok(Async::Ready(Some((client.id(), msg)))),
+                Ok(Async::Ready(None)) => return Err((client.id(), Disconnect::Dropped)),
+                Err(e) => return Err((client.id(), e)),
+                Ok(Async::NotReady) => continue,
             }
         }
 
-        if msgs.is_empty() {
-            Ok(Async::NotReady)
-        } else {
-            Ok(Async::Ready(Some(msgs)))
-        }
+        Ok(Async::NotReady)
     }
 }
 

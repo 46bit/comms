@@ -19,6 +19,7 @@ impl<I, C> Transmit<I, C>
           C::SinkError: Clone,
           C::Error: Clone
 {
+    #[doc(hidden)]
     pub fn new(room: Room<I, C>, msgs: Vec<(I, C::SinkItem)>) -> Transmit<I, C> {
         Transmit {
             room: Some(room),
