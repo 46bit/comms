@@ -12,6 +12,12 @@ use std::collections::{HashMap, HashSet};
 use futures::{Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use super::*;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum RoomError<I, T, R> {
+    UnknownClient(I),
+    DisconnectedClient(I, Disconnect<T, R>),
+}
+
 /// Handles connection with multiple server clients.
 ///
 /// It value-adds a lot of consistency by being a well-developed group of clients.
@@ -24,9 +30,6 @@ pub struct Room<I, C>
 {
     ready_clients: HashMap<I, Client<I, C>>,
     gone_clients: HashMap<I, Client<I, C>>,
-    // Data for Sink
-    start_send_list: Vec<(I, C::SinkItem)>,
-    poll_complete_list: HashSet<I>,
 }
 
 impl<I, C> Room<I, C>
@@ -165,8 +168,6 @@ impl<I, C> Default for Room<I, C>
         Room {
             ready_clients: HashMap::new(),
             gone_clients: HashMap::new(),
-            start_send_list: vec![],
-            poll_complete_list: HashSet::new(),
         }
     }
 }
@@ -177,51 +178,40 @@ impl<I, C> Sink for Room<I, C>
           C::SinkError: Clone,
           C::Error: Clone
 {
-    type SinkItem = Vec<(I, C::SinkItem)>;
-    type SinkError = ();
+    type SinkItem = (I, C::SinkItem);
+    type SinkError = RoomError<I, C::SinkError, C::Error>;
 
-    fn start_send(&mut self, msgs: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        self.start_send_list.extend(msgs);
-        Ok(AsyncSink::Ready)
+    fn start_send(&mut self,
+                  (id, msg): Self::SinkItem)
+                  -> StartSend<Self::SinkItem, Self::SinkError> {
+        // Check if the client exists but is disconnected.
+        if let Some(gone_client) = self.gone_clients.get_mut(&id) {
+            let disconnect = gone_client.status().is_gone().unwrap().clone();
+            return Err(RoomError::DisconnectedClient(id, disconnect));
+        }
+
+        // Check if the client is connected or (having also excluded disconnected) does not.
+        let client = match self.ready_client_mut(&id) {
+            None => return Err(RoomError::UnknownClient(id)),
+            Some(client) => client,
+        };
+
+        match client.start_send(msg) {
+            Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
+            Ok(AsyncSink::NotReady(msg)) => Ok(AsyncSink::NotReady((id, msg))),
+            Err(e) => Err(RoomError::DisconnectedClient(id, e)),
+        }
     }
 
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        let start_send_list = self.start_send_list.drain(..).collect::<Vec<_>>();
-        for (id, msg) in start_send_list {
-            let start_send = match self.ready_client_mut(&id) {
-                Some(ready_client) => ready_client.start_send(msg),
-                None => continue,
-            };
-            match start_send {
-                Ok(AsyncSink::NotReady(msg)) => {
-                    self.start_send_list.push((id, msg));
-                }
-                Ok(AsyncSink::Ready) => {
-                    self.poll_complete_list.insert(id);
-                }
-                Err(_) => {}
+        for client in self.ready_clients.values_mut() {
+            match client.poll_complete() {
+                Ok(Async::Ready(())) => {}
+                Ok(Async::NotReady) => return Ok(Async::NotReady),
+                Err(e) => return Err(RoomError::DisconnectedClient(client.id(), e)),
             }
         }
-
-        let poll_complete_list = self.poll_complete_list.drain().collect::<Vec<_>>();
-        for id in poll_complete_list {
-            let poll_complete = match self.ready_client_mut(&id) {
-                Some(ready_client) => ready_client.poll_complete(),
-                None => continue,
-            };
-            match poll_complete {
-                Ok(Async::NotReady) => {
-                    self.poll_complete_list.insert(id);
-                }
-                Ok(Async::Ready(())) | Err(_) => {}
-            }
-        }
-
-        if self.start_send_list.is_empty() && self.poll_complete_list.is_empty() {
-            Ok(Async::Ready(()))
-        } else {
-            Ok(Async::NotReady)
-        }
+        Ok(Async::Ready(()))
     }
 }
 
