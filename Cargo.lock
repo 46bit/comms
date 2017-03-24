@@ -1,6 +1,6 @@
 [root]
 name = "comms"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "clippy 0.0.121 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.11 (git+https://github.com/sirpent-team/futures-rs?branch=master2)",
