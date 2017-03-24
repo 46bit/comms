@@ -254,7 +254,7 @@ dependencies = [
 [[package]]
 name = "tokio-timer"
 version = "0.1.0"
-source = "git+https://github.com/sirpent-team/tokio-timer?branch=traits#8907c3a5aee8a62b94262d55b7489a80a7dafdc3"
+source = "git+https://github.com/sirpent-team/tokio-timer?branch=traits#a50e314710ebe16cc4856f82d9b6aebce8b09c7b"
 dependencies = [
  "futures 0.1.11 (git+https://github.com/sirpent-team/futures-rs?branch=master2)",
  "slab 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",

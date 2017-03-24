@@ -276,9 +276,29 @@ impl<I, C> Sink for Client<I, C>
     }
 }
 
+impl<I, C> PartialEq for Client<I, C>
+    where I: Clone + Send + Debug + PartialEq + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
+{
+    fn eq(&self, other: &Client<I, C>) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<I, C> Eq for Client<I, C>
+    where I: Clone + Send + Debug + PartialEq + Eq + 'static,
+          C: Sink + Stream + 'static,
+          C::SinkError: Clone,
+          C::Error: Clone
+{
+}
+
 // @TODO: When breaking `Client` into separate futures, try defining:
 // type Connection = Result<Connection, Disconnection>;
 // N.B., Would need a better name for the type.
+#[derive(PartialEq, Eq)]
 pub struct Unsplit<T, R>
     where T: Sink + 'static,
           R: Stream + 'static
