@@ -217,3 +217,57 @@ impl<I, C> Future for ReceiveWithSoftTimeout<I, C>
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::test::*;
+    use futures::{lazy, executor, Future, Stream};
+
+    // make the tests use a function which takes a client mapping function, so it can be
+    // generic over `receive`, `receive_with_hard_timeout`, `receive_with_soft_timeout`
+
+    #[test]
+    fn can_receive() {
+        //let (rx, tx, client) = mock_client("client1", 1);
+        // put a message and read out
+        // - check nothing available
+        // - sink message
+        // - check message available
+        // - check nothing available
+        unimplemented!();
+    }
+
+    #[test]
+    fn can_receive_several() {
+        // put multiple messages and read out one by one
+        // - sink multiple messages
+        // - check n available
+        // - check nothing available
+        unimplemented!();
+    }
+
+    #[test]
+    fn can_receive_errors() {
+        // put multiple messages, start reading out, and error channel
+        // - sink a few messages
+        // - close the channel
+        // - check Dropped error available
+        // - check client is in appropriate state and error
+        unimplemented!();
+    }
+
+    #[test]
+    fn can_hard_timeout() {
+        // put a message, read out, then don't put a message and check sink is closed
+        // within appropriate timeout, and that comes back with Disconnect::Timeout.
+        unimplemented!();
+    }
+
+    #[test]
+    fn can_soft_timeout() {
+        // put a message, read out, then don't put a message and check sink is open
+        // within appropriate timeout, that client is still connected, and that None msg.
+        unimplemented!();
+    }
+}
