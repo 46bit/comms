@@ -109,7 +109,7 @@ mod test {
     use super::*;
     use client::MpscClient;
     use std::sync::Arc;
-    use futures::executor;
+    use futures::{executor, Stream, Async, Poll};
     use futures::sync::mpsc;
     use quickcheck::{Gen, Arbitrary};
 
@@ -153,6 +153,18 @@ mod test {
         }
 
         Arc::new(Foo)
+    }
+
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+    pub struct NeverReady;
+
+    impl Stream for NeverReady {
+        type Item = NeverReady;
+        type Error = NeverReady;
+
+        fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+            Ok(Async::NotReady)
+        }
     }
 
     pub fn mock_client

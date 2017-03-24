@@ -222,12 +222,214 @@ impl<I, C> Future for ReceiveWithSoftTimeout<I, C>
 mod tests {
     use super::*;
     use super::test::*;
-    use futures::{lazy, Future};
+    use futures::{lazy, future, stream, Future};
     use std::mem::drop;
     use std::time::Instant;
 
     #[test]
     fn can_receive() {
+        let rx = stream::unfold(0, |n| Some(future::ok::<_, u32>((n + 1, n + 1))));
+        let tx: Vec<u32> = Vec::new();
+        let mut client = Client::new_from_split(0, tx, rx);
+
+        for n in 1..10 {
+            let mut receive = client.receive();
+            client = match receive.poll() {
+                Ok(Async::Ready((m, client))) => {
+                    assert_eq!(n, m);
+                    client
+                }
+                _ => unreachable!(),
+            };
+        }
+    }
+
+    #[test]
+    fn can_hard_receive_in_time() {
+        let rx = stream::unfold(0, |n| Some(future::ok::<_, u32>((n + 1, n + 1))));
+        let tx: Vec<u32> = Vec::new();
+        let mut client = Client::new_from_split(0, tx, rx);
+        let timer = tokio_timer::Timer::default();
+
+        for n in 1..10 {
+            let duration = Duration::from_millis(n * 100);
+            let mut receive = client.receive().with_hard_timeout(duration, &timer);
+            client = match receive.poll() {
+                Ok(Async::Ready((m, client))) => {
+                    assert_eq!(n, m);
+                    client
+                }
+                _ => unreachable!(),
+            };
+        }
+    }
+
+    #[test]
+    fn can_soft_receive_in_time() {
+        let rx = stream::unfold(0, |n| Some(future::ok::<_, u32>((n + 1, n + 1))));
+        let tx: Vec<u32> = Vec::new();
+        let mut client = Client::new_from_split(0, tx, rx);
+        let timer = tokio_timer::Timer::default();
+
+        for n in 1..10 {
+            let duration = Duration::from_millis(n * 100);
+            let mut receive = client.receive().with_soft_timeout(duration, &timer);
+            client = match receive.poll() {
+                Ok(Async::Ready((Some(m), client))) => {
+                    assert_eq!(n, m);
+                    client
+                }
+                _ => unreachable!(),
+            };
+        }
+    }
+
+    #[test]
+    fn can_receive_for_3_seconds() {
+        let rx = NeverReady;
+        let tx: Vec<u32> = Vec::new();
+        let client = Client::new_from_split(0, tx, rx);
+
+        let mut receive = client.receive();
+        let start = Instant::now();
+        while start.elapsed().as_secs() < 3 {
+            assert_eq!(receive.poll(), Ok(Async::NotReady));
+        }
+    }
+
+    #[test]
+    fn can_hard_receive_a_timeout() {
+        lazy(move || {
+                let rx = NeverReady;
+                let tx: Vec<u32> = Vec::new();
+                let timer = tokio_timer::Timer::default();
+
+                for n in 1..10 {
+                    let client = Client::new_from_split(0, tx.clone(), rx.clone());
+                    let duration = Duration::from_millis(n * 100);
+                    let start = Instant::now();
+                    let mut receive = client.receive().with_hard_timeout(duration, &timer);
+                    loop {
+                        match receive.poll() {
+                            Err(client) => {
+                                assert_eq!(client.status().is_disconnected(),
+                                           Some(&Disconnect::Timeout));
+                                break;
+                            }
+                            Ok(Async::NotReady) => continue,
+                            _ => unreachable!(),
+                        }
+                    }
+                    // Guards against https://github.com/tokio-rs/tokio-timer/issues/11
+                    if n > 1 {
+                        assert!(start.elapsed() > duration / 2);
+                        assert!(start.elapsed() < duration * 2);
+                    }
+                }
+                Ok::<(), ()>(())
+            })
+            .wait()
+            .unwrap();
+    }
+
+    #[test]
+    fn can_soft_receive_a_timeout() {
+        lazy(move || {
+                let rx = NeverReady;
+                let tx: Vec<u32> = Vec::new();
+                let timer = tokio_timer::Timer::default();
+
+                for n in 1..10 {
+                    let client = Client::new_from_split(0, tx.clone(), rx.clone());
+                    let duration = Duration::from_millis(n * 100);
+                    let start = Instant::now();
+                    let mut receive = client.receive().with_soft_timeout(duration, &timer);
+                    loop {
+                        match receive.poll() {
+                            Ok(Async::Ready((None, client))) => {
+                                assert!(client.status().is_connected());
+                                break;
+                            }
+                            Ok(Async::NotReady) => continue,
+                            _ => unreachable!(),
+                        }
+                    }
+                    // Guards against https://github.com/tokio-rs/tokio-timer/issues/11
+                    if n > 1 {
+                        assert!(start.elapsed() > duration / 2);
+                        assert!(start.elapsed() < duration * 2);
+                    }
+                }
+                Ok::<(), ()>(())
+            })
+            .wait()
+            .unwrap();
+    }
+
+    #[test]
+    fn can_receive_an_error() {
+        let rx = stream::once::<(), _>(Err(17));
+        let tx: Vec<u32> = Vec::new();
+        let client = Client::new_from_split(0, tx, rx);
+
+        let mut receive = client.receive();
+        match receive.poll() {
+            Err(client) => {
+                assert_eq!(client.status().is_disconnected(),
+                           Some(&Disconnect::Stream(17)));
+            }
+            _ => unreachable!(),
+        };
+    }
+
+    #[test]
+    fn can_hard_receive_an_error() {
+        lazy(move || {
+                let rx = stream::once::<(), _>(Err(17));
+                let tx: Vec<u32> = Vec::new();
+                let client = Client::new_from_split(0, tx, rx);
+
+                let timer = tokio_timer::Timer::default();
+                let duration = Duration::from_millis(1000);
+                let mut receive = client.receive().with_hard_timeout(duration, &timer);
+                match receive.poll() {
+                    Err(client) => {
+                        assert_eq!(client.status().is_disconnected(),
+                                   Some(&Disconnect::Stream(17)));
+                    }
+                    _ => unreachable!(),
+                };
+                Ok::<(), ()>(())
+            })
+            .wait()
+            .unwrap();
+    }
+
+    #[test]
+    fn can_soft_receive_an_error() {
+        lazy(move || {
+                let rx = stream::once::<(), _>(Err(17));
+                let tx: Vec<u32> = Vec::new();
+                let client = Client::new_from_split(0, tx, rx);
+
+                let timer = tokio_timer::Timer::default();
+                let duration = Duration::from_millis(1000);
+                let mut receive = client.receive().with_soft_timeout(duration, &timer);
+                match receive.poll() {
+                    Err(client) => {
+                        assert_eq!(client.status().is_disconnected(),
+                                   Some(&Disconnect::Stream(17)));
+                    }
+                    _ => unreachable!(),
+                };
+                Ok::<(), ()>(())
+            })
+            .wait()
+            .unwrap();
+    }
+
+    #[test]
+    fn can_receive_well_behaved() {
         let f = |f| f;
         let g = |g: Vec<_>| g.into_iter().map(|i| (i, i)).collect();
         subtest_well_behaved(&f, vec![]);
@@ -237,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn can_receive_with_hard_timeout() {
+    fn can_receive_with_hard_timeout_well_behaved() {
         let timer = tokio_timer::Timer::default();
         // @TODO: Warn that timeouts below 101 millis seem to trigger immediately.
         let mut millis = 200;
@@ -264,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn can_receive_with_soft_timeout() {
+    fn can_receive_with_soft_timeout_well_behaved() {
         let timer = tokio_timer::Timer::default();
         // @TODO: Warn that timeouts below 101 millis seem to trigger immediately.
         let mut millis = 200;
