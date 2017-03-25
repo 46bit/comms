@@ -4,7 +4,7 @@ This is an experimental Futures library for coordinating 1-to-N server clients.
 
 ## Status
 
-[![Build Status](https://api.travis-ci.org/sirpent-team/comms.svg)](https://travis-ci.org/sirpent-team/comms) [![Coverage Status](https://coveralls.io/repos/github/sirpent-team/comms/badge.svg)](https://coveralls.io/github/sirpent-team/comms)
+[![Build Status](https://api.travis-ci.org/46bit/comms.svg)](https://travis-ci.org/46bit/comms) [![Coverage Status](https://coveralls.io/repos/github/46bit/comms/badge.svg)](https://coveralls.io/github/46bit/comms)
 
 ## Description
 
