@@ -7,6 +7,8 @@ use std::fmt::{self, Debug};
 use futures::{Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use futures::sync::mpsc;
 use tokio_timer;
+// Without this, importing in the test below becomes nasty.
+#[allow(unused_imports)]
 use super::*;
 
 /// A client using mpsc channels.
@@ -249,6 +251,23 @@ impl<I, C> Eq for Client<I, C>
     where I: Clone + Send + Debug + PartialEq + Eq + 'static,
           C: Sink + Stream + 'static
 {
+}
+
+/// Possible causes for a disconnection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Disconnect<T, R> {
+    /// Closed with `Client::close` or similar.
+    Closed,
+    /// The `Sink` or `Stream` dropped.
+    Dropped,
+    /// Closed because of a timeout strategy.
+    Timeout,
+    /// Error in a `tokio_timer::Timer` being used for timeout.
+    Timer(tokio_timer::TimerError),
+    /// Error in the client's `Sink`.
+    Sink(T),
+    /// Error in the client's `Stream`.
+    Stream(R),
 }
 
 // @TODO: When breaking `Client` into separate futures, try defining:

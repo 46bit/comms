@@ -14,6 +14,7 @@ use std::iter::FromIterator;
 use std::vec;
 use futures::{Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use super::*;
+use client::Disconnect;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RoomError<I, C>

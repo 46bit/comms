@@ -11,23 +11,6 @@ pub mod room;
 pub use self::client::Client;
 pub use self::room::Room;
 
-/// Possible causes for a disconnection.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Disconnect<T, R> {
-    /// Closed with `Client::close` or similar.
-    Closed,
-    /// The `Sink` or `Stream` dropped.
-    Dropped,
-    /// Closed because of a timeout strategy.
-    Timeout,
-    /// Error in a `tokio_timer::Timer` being used for timeout.
-    Timer(tokio_timer::TimerError),
-    /// Error in the client's `Sink`.
-    Sink(T),
-    /// Error in the client's `Stream`.
-    Stream(R),
-}
-
 // Utilities for testing `Communicator` implementations.
 #[cfg(test)]
 mod test {
