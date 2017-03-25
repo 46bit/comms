@@ -6,8 +6,6 @@ use super::*;
 pub struct Broadcast<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
           C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone,
           C::SinkItem: Clone
 {
     room: Option<Room<I, C>>,
@@ -19,8 +17,6 @@ pub struct Broadcast<I, C>
 impl<I, C> Broadcast<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
           C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone,
           C::SinkItem: Clone
 {
     #[doc(hidden)]
@@ -41,8 +37,6 @@ impl<I, C> Broadcast<I, C>
 impl<I, C> Future for Broadcast<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
           C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone,
           C::SinkItem: Clone
 {
     type Item = Room<I, C>;

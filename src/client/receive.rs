@@ -4,18 +4,14 @@ use super::*;
 
 pub struct Receive<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     client: Option<Client<I, C>>,
 }
 
 impl<I, C> Receive<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     #[doc(hidden)]
     pub fn new(client: Client<I, C>) -> Receive<I, C> {
@@ -47,9 +43,7 @@ impl<I, C> Receive<I, C>
 
 impl<I, C> Future for Receive<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     type Item = (C::Item, Client<I, C>);
     type Error = Client<I, C>;
@@ -70,9 +64,7 @@ impl<I, C> Future for Receive<I, C>
 
 pub struct ReceiveWithHardTimeout<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     client: Option<Client<I, C>>,
     sleep: tokio_timer::Sleep,
@@ -80,9 +72,7 @@ pub struct ReceiveWithHardTimeout<I, C>
 
 impl<I, C> ReceiveWithHardTimeout<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     #[doc(hidden)]
     pub fn new(client: Client<I, C>,
@@ -106,9 +96,7 @@ impl<I, C> ReceiveWithHardTimeout<I, C>
 
 impl<I, C> Future for ReceiveWithHardTimeout<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     type Item = (C::Item, Client<I, C>);
     type Error = Client<I, C>;
@@ -149,9 +137,7 @@ impl<I, C> Future for ReceiveWithHardTimeout<I, C>
 
 pub struct ReceiveWithSoftTimeout<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     client: Option<Client<I, C>>,
     sleep: tokio_timer::Sleep,
@@ -159,9 +145,7 @@ pub struct ReceiveWithSoftTimeout<I, C>
 
 impl<I, C> ReceiveWithSoftTimeout<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     #[doc(hidden)]
     pub fn new(client: Client<I, C>,
@@ -185,9 +169,7 @@ impl<I, C> ReceiveWithSoftTimeout<I, C>
 
 impl<I, C> Future for ReceiveWithSoftTimeout<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     type Item = (Option<C::Item>, Client<I, C>);
     type Error = Client<I, C>;
@@ -312,8 +294,7 @@ mod tests {
                     loop {
                         match receive.poll() {
                             Err(client) => {
-                                assert_eq!(client.status().is_disconnected(),
-                                           Some(&Disconnect::Timeout));
+                                assert_eq!(client.is_disconnected(), Some(&Disconnect::Timeout));
                                 break;
                             }
                             Ok(Async::NotReady) => continue,
@@ -347,7 +328,7 @@ mod tests {
                     loop {
                         match receive.poll() {
                             Ok(Async::Ready((None, client))) => {
-                                assert!(client.status().is_connected());
+                                assert!(client.is_connected());
                                 break;
                             }
                             Ok(Async::NotReady) => continue,
@@ -375,8 +356,7 @@ mod tests {
         let mut receive = client.receive();
         match receive.poll() {
             Err(client) => {
-                assert_eq!(client.status().is_disconnected(),
-                           Some(&Disconnect::Stream(17)));
+                assert_eq!(client.is_disconnected(), Some(&Disconnect::Stream(17)));
             }
             _ => unreachable!(),
         };
@@ -394,8 +374,7 @@ mod tests {
                 let mut receive = client.receive().with_hard_timeout(duration, &timer);
                 match receive.poll() {
                     Err(client) => {
-                        assert_eq!(client.status().is_disconnected(),
-                                   Some(&Disconnect::Stream(17)));
+                        assert_eq!(client.is_disconnected(), Some(&Disconnect::Stream(17)));
                     }
                     _ => unreachable!(),
                 };
@@ -417,8 +396,7 @@ mod tests {
                 let mut receive = client.receive().with_soft_timeout(duration, &timer);
                 match receive.poll() {
                     Err(client) => {
-                        assert_eq!(client.status().is_disconnected(),
-                                   Some(&Disconnect::Stream(17)));
+                        assert_eq!(client.is_disconnected(), Some(&Disconnect::Stream(17)));
                     }
                     _ => unreachable!(),
                 };
@@ -457,8 +435,8 @@ mod tests {
             // Check that ReceiveWithHardTimeout is well behaved for timing out.
             let timeouted_client = subtest_timeout_happens(&f, duration);
             // Ensure a timeout results in connection closure.
-            assert_eq!(timeouted_client.status().is_connected(), false);
-            assert_eq!(timeouted_client.status().is_disconnected(),
+            assert_eq!(timeouted_client.is_connected(), false);
+            assert_eq!(timeouted_client.is_disconnected(),
                        Some(&Disconnect::Timeout));
 
             millis += 50;
@@ -484,8 +462,8 @@ mod tests {
             // Check that ReceiveWithSoftTimeout is well behaved for timing out.
             let timeouted_client = subtest_timeout_happens(&f, duration);
             // Ensure a timeout does not result in connection closure.
-            assert!(timeouted_client.status().is_connected());
-            assert_eq!(timeouted_client.status().is_disconnected(), None);
+            assert!(timeouted_client.is_connected());
+            assert_eq!(timeouted_client.is_disconnected(), None);
 
             millis += 50;
         }
@@ -524,8 +502,7 @@ mod tests {
                 // client sink.
                 drop(tx);
                 if let Err(client) = fut.poll() {
-                    assert_eq!(client.status().is_disconnected(),
-                               Some(&Disconnect::Dropped));
+                    assert_eq!(client.is_disconnected(), Some(&Disconnect::Dropped));
                 } else {
                     unreachable!();
                 }

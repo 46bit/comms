@@ -32,35 +32,6 @@ pub enum Disconnect<T, R> {
     Stream(R),
 }
 
-/// Whether a client is connected or disconnected.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Status<T, R> {
-    /// The Client appears to be connected.
-    Connected,
-    /// The client is disconnected (and the `Disconnect` explaining why).
-    Disconnected(Disconnect<T, R>),
-}
-
-impl<T, R> Status<T, R> {
-    /// Is the client connected?
-    pub fn is_connected(&self) -> bool {
-        if let Status::Connected = *self {
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Is the client disconnected.
-    pub fn is_disconnected(&self) -> Option<&Disconnect<T, R>> {
-        if let Status::Disconnected(ref e) = *self {
-            Some(e)
-        } else {
-            None
-        }
-    }
-}
-
 /// Convert `io::Error` to a `Clone` representation.
 ///
 /// `Client` and `Room` store the most recent error to conveniently keep track of connection

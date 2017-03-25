@@ -5,9 +5,7 @@ use super::*;
 
 pub struct Receive<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     room: Option<Room<I, C>>,
     poll_list: HashSet<I>,
@@ -16,9 +14,7 @@ pub struct Receive<I, C>
 
 impl<I, C> Receive<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     #[doc(hidden)]
     pub fn new(room: Room<I, C>, ids: HashSet<I>) -> Receive<I, C> {
@@ -37,9 +33,7 @@ impl<I, C> Receive<I, C>
 
 impl<I, C> Future for Receive<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     type Item = (HashMap<I, C::Item>, Room<I, C>);
     type Error = ();

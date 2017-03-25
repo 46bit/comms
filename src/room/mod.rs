@@ -9,13 +9,18 @@ pub use self::receive::*;
 
 use std::hash::Hash;
 use std::collections::{HashMap, HashSet};
+use std::iter::FromIterator;
+use std::vec;
 use futures::{Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use super::*;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum RoomError<I, T, R> {
+pub enum RoomError<I, C>
+    where I: Clone + Send + Debug + 'static,
+          C: Sink + Stream + 'static
+{
     UnknownClient(I),
-    DisconnectedClient(I, Disconnect<T, R>),
+    DisconnectedClient(I, Disconnect<C::SinkError, C::Error>),
 }
 
 /// Handles connection with multiple server clients.
@@ -24,19 +29,14 @@ pub enum RoomError<I, T, R> {
 /// In my applications it's being immensely helpful to factor out this logic to here.
 pub struct Room<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     clients: HashMap<I, Client<I, C>>,
-    connected_ids: HashSet<I>,
 }
 
 impl<I, C> Room<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     /// Construct a new `Room` from a list of `Client`.
     ///
@@ -49,19 +49,13 @@ impl<I, C> Room<I, C>
         room
     }
 
-    /// Get the IDs of all the clients.
+    /// Get the IDs of all connected clients.
     pub fn ids(&self) -> HashSet<I> {
         self.clients.keys().cloned().collect()
     }
 
-    /// Get the IDs of all connected clients.
-    pub fn connected_ids(&self) -> HashSet<I> {
-        self.connected_ids.clone()
-    }
-
-    /// Get the IDs of all disconnected clients.
-    pub fn gone_ids(&self) -> HashSet<I> {
-        &self.ids() - &self.connected_ids()
+    pub fn client(&self, id: &I) -> Option<&Client<I, C>> {
+        self.clients.get(id)
     }
 
     #[doc(hidden)]
@@ -69,14 +63,12 @@ impl<I, C> Room<I, C>
         self.clients.get_mut(id)
     }
 
-    // @TODO: Exists only for `Client::join`. When RFC1422 is stable, make this `pub(super)`.
-    #[doc(hidden)]
+    /// Insert a `Client` into this room and return whether it was newly added.
+    ///
+    /// For now this accepts disconnected clients but this may change in future.
     pub fn insert(&mut self, client: Client<I, C>) -> bool {
         if self.contains(&client.id()) {
             return false;
-        }
-        if client.status().is_connected() {
-            self.connected_ids.insert(client.id());
         }
         self.clients.insert(client.id(), client);
         true
@@ -96,8 +88,8 @@ impl<I, C> Room<I, C>
     pub fn broadcast_all(self, msg: C::SinkItem) -> Broadcast<I, C>
         where C::SinkItem: Clone
     {
-        let connected_ids = self.connected_ids();
-        Broadcast::new(self, msg, connected_ids)
+        let ids = self.ids();
+        Broadcast::new(self, msg, ids)
     }
 
     /// Broadcast a single message to particular connected clients.
@@ -114,20 +106,13 @@ impl<I, C> Room<I, C>
 
     /// Try to receive a single message from all clients.
     pub fn receive_all(self) -> Receive<I, C> {
-        let connected_ids = self.connected_ids();
-        Receive::new(self, connected_ids)
+        let ids = self.ids();
+        Receive::new(self, ids)
     }
 
     /// Try to receive a single message from particular clients.
     pub fn receive(self, ids: HashSet<I>) -> Receive<I, C> {
         Receive::new(self, ids.into_iter().collect())
-    }
-
-    // @TODO: When client has a method to check its status against the internal rx/tx,
-    // update this to use it (or make a new method to.)
-    /// Get the status of all the clients.
-    pub fn statuses(&self) -> HashMap<I, Status<C::SinkError, C::Error>> {
-        self.clients.iter().map(|(id, client)| (id.clone(), client.status())).collect()
     }
 
     /// Force disconnection of particular clients.
@@ -150,30 +135,28 @@ impl<I, C> Room<I, C>
     pub fn into_clients(self) -> HashMap<I, Client<I, C>> {
         self.clients
     }
+
+    fn err_for_disconnect(&mut self, id: I) -> RoomError<I, C> {
+        let (id, disconnect) = self.clients.remove(&id).unwrap().into_disconnect();
+        RoomError::DisconnectedClient(id, disconnect)
+    }
 }
 
 impl<I, C> Default for Room<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     fn default() -> Room<I, C> {
-        Room {
-            clients: HashMap::new(),
-            connected_ids: HashSet::new(),
-        }
+        Room { clients: HashMap::new() }
     }
 }
 
 impl<I, C> Sink for Room<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     type SinkItem = (I, C::SinkItem);
-    type SinkError = RoomError<I, C::SinkError, C::Error>;
+    type SinkError = RoomError<I, C>;
 
     fn start_send(&mut self,
                   (id, msg): Self::SinkItem)
@@ -190,20 +173,24 @@ impl<I, C> Sink for Room<I, C>
         match client_poll {
             Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
             Ok(AsyncSink::NotReady(msg)) => Ok(AsyncSink::NotReady((id.clone(), msg))),
-            Err(e) => {
-                self.connected_ids.remove(&id);
-                Err(RoomError::DisconnectedClient(id, e))
+            Err(()) => {
+                return Err(self.err_for_disconnect(id));
             }
         }
     }
 
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        for id in &self.connected_ids {
-            let client = self.clients.get_mut(id).unwrap();
-            match client.poll_complete() {
+        for id in self.clients.keys().cloned().collect::<Vec<I>>() {
+            let poll_complete = {
+                let client = self.clients.get_mut(&id).unwrap();
+                client.poll_complete()
+            };
+            match poll_complete {
                 Ok(Async::Ready(())) => {}
                 Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => return Err(RoomError::DisconnectedClient(id.clone(), e)),
+                Err(()) => {
+                    return Err(self.err_for_disconnect(id));
+                }
             }
         }
         Ok(Async::Ready(()))
@@ -212,31 +199,51 @@ impl<I, C> Sink for Room<I, C>
 
 impl<I, C> Stream for Room<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     type Item = (I, C::Item);
-    type Error = (I, Disconnect<C::SinkError, C::Error>);
+    type Error = RoomError<I, C>;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        for id in self.connected_ids() {
-            let client = self.clients.get_mut(&id).unwrap();
-            match client.poll() {
-                Ok(Async::Ready(Some(msg))) => return Ok(Async::Ready(Some((client.id(), msg)))),
+        for id in self.clients.keys().cloned().collect::<Vec<I>>() {
+            let poll = {
+                let client = self.clients.get_mut(&id).unwrap();
+                client.poll()
+            };
+            match poll {
+                Ok(Async::Ready(Some(msg))) => return Ok(Async::Ready(Some((id, msg)))),
                 Ok(Async::Ready(None)) => {
-                    self.connected_ids.remove(&id);
-                    return Err((client.id(), Disconnect::Dropped));
+                    return Err(self.err_for_disconnect(id));
                 }
-                Err(e) => {
-                    self.connected_ids.remove(&id);
-                    return Err((client.id(), e));
+                Err(()) => {
+                    return Err(self.err_for_disconnect(id));
                 }
                 Ok(Async::NotReady) => continue,
             }
         }
 
         Ok(Async::NotReady)
+    }
+}
+
+impl<I, C> IntoIterator for Room<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static
+{
+    type Item = Client<I, C>;
+    type IntoIter = vec::IntoIter<Client<I, C>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.clients.into_iter().map(|(_, client)| client).collect::<Vec<_>>().into_iter()
+    }
+}
+
+impl<I, C> FromIterator<Client<I, C>> for Room<I, C>
+    where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
+          C: Sink + Stream + 'static
+{
+    fn from_iter<J: IntoIterator<Item = Client<I, C>>>(iter: J) -> Room<I, C> {
+        Room::new(iter.into_iter().collect())
     }
 }
 
@@ -294,9 +301,8 @@ mod tests {
         match future.wait_future() {
             Ok((msgs, room)) => {
                 assert_eq!(msgs, exp_msgs);
-                assert_eq!(room.statuses()
-                               .into_iter()
-                               .map(|(id, status)| (id, status.is_connected()))
+                assert_eq!(room.into_iter()
+                               .map(|client| (client.id(), client.is_connected()))
                                .collect::<HashMap<_, _>>(),
                            vec![(id0, true), (id1, true)].into_iter().collect());
             }
@@ -310,24 +316,26 @@ mod tests {
         let (_, _, client1) = mock_client("client1", 1);
 
         let mut room = Room::new(vec![client0, client1]);
-        for (_, status) in room.statuses() {
-            assert!(status.is_connected());
+        for id in room.ids() {
+            assert!(room.client(&id).unwrap().is_connected());
         }
 
         let mut msgs = HashMap::new();
         msgs.insert("client0".to_string(), TinyMsg::A);
         room = room.transmit(msgs).wait().unwrap();
-        for (id, status) in room.statuses() {
+        for id in room.ids() {
+            let client = room.client(&id).unwrap();
             if id == "client0".to_string() {
-                assert!(status.is_disconnected().is_some());
+                assert!(client.is_disconnected().is_some());
             } else {
-                assert!(status.is_connected());
+                assert!(client.is_connected());
             }
         }
 
         room = room.broadcast_all(TinyMsg::B("abc".to_string())).wait().unwrap();
-        for (_, status) in room.statuses() {
-            assert!(status.is_disconnected().is_some());
+        for id in room.ids() {
+            let client = room.client(&id).unwrap();
+            assert!(client.is_disconnected().is_some());
         }
     }
 }

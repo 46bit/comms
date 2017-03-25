@@ -4,9 +4,7 @@ use super::*;
 
 pub struct Transmit<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     room: Option<Room<I, C>>,
     start_send_list: Vec<(I, C::SinkItem)>,
@@ -15,9 +13,7 @@ pub struct Transmit<I, C>
 
 impl<I, C> Transmit<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     #[doc(hidden)]
     pub fn new(room: Room<I, C>, msgs: Vec<(I, C::SinkItem)>) -> Transmit<I, C> {
@@ -35,9 +31,7 @@ impl<I, C> Transmit<I, C>
 
 impl<I, C> Future for Transmit<I, C>
     where I: Clone + Send + PartialEq + Eq + Hash + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     type Item = Room<I, C>;
     type Error = ();

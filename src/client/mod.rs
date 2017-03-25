@@ -1,12 +1,11 @@
 mod receive;
+mod transmit;
 pub use self::receive::*;
+pub use self::transmit::*;
 
-use std::hash::Hash;
 use std::fmt::{self, Debug};
 use futures::{Future, Sink, Stream, Poll, Async, AsyncSink, StartSend};
 use futures::sync::mpsc;
-use futures::stream::{FromErr, SplitStream, SplitSink};
-use futures::sink::SinkFromErr;
 use tokio_timer;
 use super::*;
 
@@ -19,12 +18,10 @@ use super::*;
 /// In addition this supports timeouts on receiving data. The `Timeout` enum
 /// allows specifying whether to have a timeout and whether the client should
 /// be disconnected should the timeout not be met.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Client<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     id: I,
     inner: Result<C, Disconnect<C::SinkError, C::Error>>,
@@ -33,39 +30,13 @@ pub struct Client<I, C>
 impl<I, T, R> Client<I, Unsplit<T, R>>
     where I: Clone + Send + Debug + 'static,
           T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+          R: Stream + 'static
 {
     /// Create a new client from separate `Sink` and `Stream`.
     ///
     /// Created from the ID, a `Sink` and a `Stream`.
     pub fn new_from_split(id: I, tx: T, rx: R) -> Client<I, Unsplit<T, R>> {
         Client::new(id, Unsplit { tx: tx, rx: rx })
-    }
-}
-
-// @TODO: Implement `Sink` on `futures::stream::FromErr` to simplify these types.
-impl<I, C> Client<I,
-                  Unsplit<SinkFromErr<SplitSink<C>, ErrorString>,
-                          FromErr<SplitStream<C>, ErrorString>>>
-    where I: Clone + Send + Debug + 'static,
-          C: Sink<SinkError = io::Error> + Stream<Error = io::Error> + 'static
-{
-    /// Create a new client from a `Sink + Stream` that uses `io::Error`.
-    ///
-    /// ```rust,ignore
-    /// listener.incoming()
-    ///     .for_each(move |(socket, addr)| {
-    ///         let client = Client::new_from_io(Uuid::new_v4(), ClientTimeout::None, socket.framed(MsgCodec));
-    /// ```
-    pub fn new_from_io(id: I,
-                       tx_rx: C)
-                       -> Client<I,
-                                 Unsplit<SinkFromErr<SplitSink<C>, ErrorString>,
-                                         FromErr<SplitStream<C>, ErrorString>>> {
-        let (tx, rx) = tx_rx.split();
-        Client::new_from_split(id, tx.sink_from_err(), rx.from_err())
     }
 }
 
@@ -77,9 +48,7 @@ pub type MpscClient<I, M> = Client<I, Unsplit<mpsc::Sender<M>, mpsc::Receiver<M>
 
 impl<I, C> Client<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     /// Create a new client from a `Sink + Stream`.
     ///
@@ -106,13 +75,6 @@ impl<I, C> Client<I, C>
         }
     }
 
-    /// Join a `Room` of clients with the same type.
-    pub fn join(self, room: &mut Room<I, C>) -> bool
-        where I: PartialEq + Eq + Hash
-    {
-        room.insert(self)
-    }
-
     /// Future that transmits a single message.
     ///
     /// If this succeeds the Item is a Client. If the transmission fails the Error is a
@@ -128,15 +90,8 @@ impl<I, C> Client<I, C>
     ///     .map(|client| println!("sent hello to {}.", client.id()); ())
     ///     .map_err(|client| println!("sending hello to {} failed.", client.id()); ()));
     /// ```
-    pub fn transmit(self, msg: C::SinkItem) -> Box<Future<Item = Self, Error = Self>> {
-        // N.B. This does ensure the inner is set, but it's a bit of a hack.
-        let id = self.id();
-        Box::new(self.send(msg).map_err(|e| {
-            Client {
-                id: id,
-                inner: Err(e.clone()),
-            }
-        }))
+    pub fn transmit(self, msg: C::SinkItem) -> Transmit<I, C> {
+        Transmit::new(self, msg)
     }
 
     /// Future that tries to receive a single message.
@@ -144,17 +99,17 @@ impl<I, C> Client<I, C>
         Receive::new(self)
     }
 
-    /// Get the current status of this Client.
-    ///
-    /// Check whether a Client is connected with `client.status().is_connected()`.
-    ///
-    /// If disconnected you can get the cause of disconnection with
-    /// `client.status().is_disconnected().unwrap()`.
-    pub fn status(&self) -> Status<C::SinkError, C::Error> {
+    /// Is the client connected?
+    pub fn is_connected(&self) -> bool {
+        self.inner.is_ok()
+    }
+
+    /// Get disconnection cause if the client is disconnected.
+    pub fn is_disconnected(&self) -> Option<&Disconnect<C::SinkError, C::Error>> {
         if let Err(ref e) = self.inner {
-            Status::Disconnected(e.clone())
+            Some(e)
         } else {
-            Status::Connected
+            None
         }
     }
 
@@ -185,16 +140,23 @@ impl<I, C> Client<I, C>
     pub fn into_inner(self) -> (I, Result<C, Disconnect<C::SinkError, C::Error>>) {
         (self.id, self.inner)
     }
+
+    #[doc(hidden)]
+    pub fn into_disconnect(self) -> (I, Disconnect<C::SinkError, C::Error>) {
+        let disconnect = match self.inner {
+            Ok(_) => unimplemented!(),
+            Err(disconnect) => disconnect,
+        };
+        (self.id, disconnect)
+    }
 }
 
 impl<I, C> Stream for Client<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     type Item = C::Item;
-    type Error = Disconnect<C::SinkError, C::Error>;
+    type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         let inner_poll = {
@@ -219,8 +181,8 @@ impl<I, C> Stream for Client<I, C>
             // If the stream yields an error we discard it. This is a limitation vs the
             // current stream error model but it simplifies an already complex model.
             Err(e) => {
-                self.inner = Err(Disconnect::Stream(e.clone()));
-                Err(Disconnect::Stream(e))
+                self.inner = Err(Disconnect::Stream(e));
+                Ok(Async::Ready(None))
             }
         }
     }
@@ -228,17 +190,15 @@ impl<I, C> Stream for Client<I, C>
 
 impl<I, C> Sink for Client<I, C>
     where I: Clone + Send + Debug + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     type SinkItem = C::SinkItem;
-    type SinkError = Disconnect<C::SinkError, C::Error>;
+    type SinkError = ();
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         let inner_start_send = {
             let inner = match self.inner.as_mut() {
-                Err(_) => return Err(Disconnect::Closed),
+                Err(_) => return Err(()),
                 Ok(inner) => inner,
             };
 
@@ -249,8 +209,8 @@ impl<I, C> Sink for Client<I, C>
             Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
             Ok(AsyncSink::NotReady(item)) => Ok(AsyncSink::NotReady(item)),
             Err(e) => {
-                self.inner = Err(Disconnect::Sink(e.clone()));
-                Err(Disconnect::Sink(e))
+                self.inner = Err(Disconnect::Sink(e));
+                Err(())
             }
         }
     }
@@ -258,7 +218,7 @@ impl<I, C> Sink for Client<I, C>
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
         let inner_poll_complete = {
             let inner = match self.inner.as_mut() {
-                Err(_) => return Err(Disconnect::Closed),
+                Err(_) => return Err(()),
                 Ok(inner) => inner,
             };
 
@@ -269,8 +229,8 @@ impl<I, C> Sink for Client<I, C>
             Ok(Async::Ready(())) => Ok(Async::Ready(())),
             Ok(Async::NotReady) => Ok(Async::NotReady),
             Err(e) => {
-                self.inner = Err(Disconnect::Sink(e.clone()));
-                Err(Disconnect::Sink(e))
+                self.inner = Err(Disconnect::Sink(e));
+                Err(())
             }
         }
     }
@@ -278,9 +238,7 @@ impl<I, C> Sink for Client<I, C>
 
 impl<I, C> PartialEq for Client<I, C>
     where I: Clone + Send + Debug + PartialEq + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
     fn eq(&self, other: &Client<I, C>) -> bool {
         self.id == other.id
@@ -289,9 +247,7 @@ impl<I, C> PartialEq for Client<I, C>
 
 impl<I, C> Eq for Client<I, C>
     where I: Clone + Send + Debug + PartialEq + Eq + 'static,
-          C: Sink + Stream + 'static,
-          C::SinkError: Clone,
-          C::Error: Clone
+          C: Sink + Stream + 'static
 {
 }
 
@@ -321,9 +277,7 @@ impl<T, R> Debug for Unsplit<T, R>
 
 impl<T, R> Sink for Unsplit<T, R>
     where T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+          R: Stream + 'static
 {
     type SinkItem = T::SinkItem;
     type SinkError = T::SinkError;
@@ -339,9 +293,7 @@ impl<T, R> Sink for Unsplit<T, R>
 
 impl<T, R> Stream for Unsplit<T, R>
     where T: Sink + 'static,
-          R: Stream + 'static,
-          T::SinkError: Clone,
-          R::Error: Clone
+          R: Stream + 'static
 {
     type Item = R::Item;
     type Error = R::Error;
@@ -369,18 +321,18 @@ mod tests {
         // Adding of a `Client` to a `Room` returns `true`.
         let mut room = Room::default();
         assert_eq!(room.ids().len(), 0);
-        assert!(client0.join(&mut room));
+        assert!(room.insert(client0));
         assert_eq!(room.ids(),
                    vec![client0_id.to_string()].into_iter().collect());
 
         // Adding a `Client` whose ID was already present returns `false` and doesn't
         // add a duplicate.
-        assert!(!client0_duplicate_name.join(&mut room));
+        assert_eq!(room.insert(client0_duplicate_name), false);
         assert_eq!(room.ids(),
                    vec![client0_id.to_string()].into_iter().collect());
 
         // Adding a different-IDed `Client` to a `Room` works.
-        assert!(client1.join(&mut room));
+        assert!(room.insert(client1));
         // Extended comparison necessary because ordering not preserved.
         let client_ids = room.ids();
         assert!(client_ids.len() == 2);
@@ -501,34 +453,34 @@ mod tests {
         let msg = TinyMsg::B("ABC".to_string());
 
         let (mut rx_from_client, _, client) = mock_client("client1", 1);
-        assert!(client.status().is_connected());
+        assert!(client.is_connected());
         // Check unfortunate edgecase that a closed channel is not noticed until the next
         // IO action.
         let _ = rx_from_client.close();
-        assert!(client.status().is_connected());
+        assert!(client.is_connected());
 
         let (_, mut tx_to_client, client) = mock_client("client2", 1);
-        assert!(client.status().is_connected());
+        assert!(client.is_connected());
         let _ = tx_to_client.close();
         // Check unfortunate edgecase that a closed channel is not noticed until the next
         // IO action.
-        assert!(client.status().is_connected());
+        assert!(client.is_connected());
 
         // Assert that status with dropped channels indicates the client is gone.
         let (_, _, client) = mock_client("client2", 1);
-        assert!(client.status().is_connected());
+        assert!(client.is_connected());
         match client.transmit(msg.clone()).wait() {
             Ok(_) => unreachable!(),
-            Err(client) => assert!(client.status().is_disconnected().is_some()),
+            Err(client) => assert!(client.is_disconnected().is_some()),
         };
     }
 
     #[test]
     fn can_close() {
         let (_, _, mut client) = mock_client("client1", 1);
-        assert!(client.status().is_connected());
+        assert!(client.is_connected());
         client.close();
-        assert!(client.status().is_disconnected().is_some());
+        assert!(client.is_disconnected().is_some());
         // @TODO: Check channels are gone.
     }
 }
