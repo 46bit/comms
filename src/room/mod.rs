@@ -178,16 +178,22 @@ impl<I, C> Sink for Room<I, C>
     fn start_send(&mut self,
                   (id, msg): Self::SinkItem)
                   -> StartSend<Self::SinkItem, Self::SinkError> {
-        // Check if the client is connected or (having also excluded disconnected) does not.
-        let client = match self.client_mut(&id) {
-            None => return Err(RoomError::UnknownClient(id)),
-            Some(client) => client,
+        let client_poll = {
+            // Check if the client is connected or (having also excluded disconnected) does not.
+            let client = match self.client_mut(&id) {
+                None => return Err(RoomError::UnknownClient(id)),
+                Some(client) => client,
+            };
+            client.start_send(msg)
         };
 
-        match client.start_send(msg) {
+        match client_poll {
             Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
-            Ok(AsyncSink::NotReady(msg)) => Ok(AsyncSink::NotReady((id, msg))),
-            Err(e) => Err(RoomError::DisconnectedClient(id, e)),
+            Ok(AsyncSink::NotReady(msg)) => Ok(AsyncSink::NotReady((id.clone(), msg))),
+            Err(e) => {
+                self.connected_ids.remove(&id);
+                Err(RoomError::DisconnectedClient(id, e))
+            }
         }
     }
 
@@ -214,12 +220,18 @@ impl<I, C> Stream for Room<I, C>
     type Error = (I, Disconnect<C::SinkError, C::Error>);
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        for id in &self.connected_ids {
-            let client = self.clients.get_mut(id).unwrap();
+        for id in self.connected_ids() {
+            let client = self.clients.get_mut(&id).unwrap();
             match client.poll() {
                 Ok(Async::Ready(Some(msg))) => return Ok(Async::Ready(Some((client.id(), msg)))),
-                Ok(Async::Ready(None)) => return Err((client.id(), Disconnect::Dropped)),
-                Err(e) => return Err((client.id(), e)),
+                Ok(Async::Ready(None)) => {
+                    self.connected_ids.remove(&id);
+                    return Err((client.id(), Disconnect::Dropped));
+                }
+                Err(e) => {
+                    self.connected_ids.remove(&id);
+                    return Err((client.id(), e));
+                }
                 Ok(Async::NotReady) => continue,
             }
         }
