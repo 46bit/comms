@@ -9,6 +9,12 @@ use futures::sync::mpsc;
 use tokio_timer;
 use super::*;
 
+/// A client using mpsc channels.
+pub type MpscClient<I, M> = Client<I, Unsplit<mpsc::Sender<M>, mpsc::Receiver<M>>>;
+// @TODO: Adopting tokio-io feature flag could allow these handy types. Unsure if worthwhile.
+//pub type TokioClient<S, C> = Client<I, Framed<S, C>>;
+//pub type TokioTcpClient<C> = Client<I, Framed<TcpStream, C>>;
+
 /// Handles communication with a single server client.
 ///
 /// This is the basic 'unit' around which `comms` is constructed. It handles
@@ -39,12 +45,6 @@ impl<I, T, R> Client<I, Unsplit<T, R>>
         Client::new(id, Unsplit { tx: tx, rx: rx })
     }
 }
-
-/// A client using mpsc channels.
-pub type MpscClient<I, M> = Client<I, Unsplit<mpsc::Sender<M>, mpsc::Receiver<M>>>;
-// @TODO: Adopting tokio-io feature flag could allow these handy types. Unsure if worthwhile.
-//pub type TokioClient<S, C> = Client<I, Framed<S, C>>;
-//pub type TokioTcpClient<C> = Client<I, Framed<TcpStream, C>>;
 
 impl<I, C> Client<I, C>
     where I: Clone + Send + Debug + 'static,

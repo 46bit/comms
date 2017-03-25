@@ -11,10 +11,6 @@ pub mod room;
 pub use self::client::Client;
 pub use self::room::Room;
 
-use std::io;
-use std::error;
-use std::fmt::{self, Debug};
-
 /// Possible causes for a disconnection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Disconnect<T, R> {
@@ -30,48 +26,6 @@ pub enum Disconnect<T, R> {
     Sink(T),
     /// Error in the client's `Stream`.
     Stream(R),
-}
-
-/// Convert `io::Error` to a `Clone` representation.
-///
-/// `Client` and `Room` store the most recent error to conveniently keep track of connection
-/// status. This requires those errors to be `Clone`. This offers an easy way to do that for
-/// a common error type.
-///
-/// The easiest way to convert a `Stream<Error = io::Error>` or `Sink<SinkError = io::Error>`
-/// is using `futures::Stream::from_err` and `futures::Sink::sink_from_err`.
-///
-/// ```rust,ignore
-/// extern crate futures;
-/// use std::io;
-/// use futures::{stream, Stream};
-///
-/// let stream = stream::iter(vec![Ok(5), Err(io::Error::new(io::ErrorKind::Other, "oh no!"))]);
-/// let stream_with_clone_error: Stream<Item = u64, Error = IoErrorString> = stream.from_err();
-/// ```
-#[derive(Debug, Clone, PartialEq)]
-pub struct ErrorString(String);
-
-impl From<io::Error> for ErrorString {
-    fn from(e: io::Error) -> ErrorString {
-        ErrorString(format!("{}", e))
-    }
-}
-
-impl fmt::Display for ErrorString {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl error::Error for ErrorString {
-    fn description(&self) -> &str {
-        &self.0
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        None
-    }
 }
 
 // Utilities for testing `Communicator` implementations.

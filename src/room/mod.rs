@@ -7,6 +7,7 @@ pub use self::broadcast::*;
 pub use self::transmit::*;
 pub use self::receive::*;
 
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
