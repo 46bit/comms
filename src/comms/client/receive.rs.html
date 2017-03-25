@@ -606,29 +606,6 @@
 <span id="561">561</span>
 <span id="562">562</span>
 <span id="563">563</span>
-<span id="564">564</span>
-<span id="565">565</span>
-<span id="566">566</span>
-<span id="567">567</span>
-<span id="568">568</span>
-<span id="569">569</span>
-<span id="570">570</span>
-<span id="571">571</span>
-<span id="572">572</span>
-<span id="573">573</span>
-<span id="574">574</span>
-<span id="575">575</span>
-<span id="576">576</span>
-<span id="577">577</span>
-<span id="578">578</span>
-<span id="579">579</span>
-<span id="580">580</span>
-<span id="581">581</span>
-<span id="582">582</span>
-<span id="583">583</span>
-<span id="584">584</span>
-<span id="585">585</span>
-<span id="586">586</span>
 </pre><pre class="rust ">
 <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">time</span>::<span class="ident">Duration</span>;
 <span class="kw">use</span> <span class="ident">futures</span>::{<span class="ident">Future</span>, <span class="ident">Sink</span>, <span class="ident">Stream</span>, <span class="ident">Poll</span>, <span class="ident">Async</span>};
@@ -636,18 +613,14 @@
 
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Receive</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="ident">client</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;&gt;</span>,
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">Receive</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="attribute">#[<span class="ident">doc</span>(<span class="ident">hidden</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">client</span>: <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>) <span class="op">-&gt;</span> <span class="ident">Receive</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> {
@@ -679,9 +652,7 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">Future</span> <span class="kw">for</span> <span class="ident">Receive</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> (<span class="ident">C</span>::<span class="ident">Item</span>, <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>);
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>;
@@ -702,9 +673,7 @@
 
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ReceiveWithHardTimeout</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="ident">client</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;&gt;</span>,
     <span class="ident">sleep</span>: <span class="ident">tokio_timer</span>::<span class="ident">Sleep</span>,
@@ -712,9 +681,7 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">ReceiveWithHardTimeout</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="attribute">#[<span class="ident">doc</span>(<span class="ident">hidden</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">client</span>: <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>,
@@ -738,9 +705,7 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">Future</span> <span class="kw">for</span> <span class="ident">ReceiveWithHardTimeout</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> (<span class="ident">C</span>::<span class="ident">Item</span>, <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>);
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>;
@@ -781,9 +746,7 @@
 
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ReceiveWithSoftTimeout</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="ident">client</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;&gt;</span>,
     <span class="ident">sleep</span>: <span class="ident">tokio_timer</span>::<span class="ident">Sleep</span>,
@@ -791,9 +754,7 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">ReceiveWithSoftTimeout</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="attribute">#[<span class="ident">doc</span>(<span class="ident">hidden</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">client</span>: <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>,
@@ -817,9 +778,7 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">Future</span> <span class="kw">for</span> <span class="ident">ReceiveWithSoftTimeout</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> (<span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">C</span>::<span class="ident">Item</span><span class="op">&gt;</span>, <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>);
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>;
@@ -944,8 +903,7 @@
                     <span class="kw">loop</span> {
                         <span class="kw">match</span> <span class="ident">receive</span>.<span class="ident">poll</span>() {
                             <span class="prelude-val">Err</span>(<span class="ident">client</span>) <span class="op">=&gt;</span> {
-                                <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_disconnected</span>(),
-                                           <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">Disconnect</span>::<span class="ident">Timeout</span>));
+                                <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_disconnected</span>(), <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">Disconnect</span>::<span class="ident">Timeout</span>));
                                 <span class="kw">break</span>;
                             }
                             <span class="prelude-val">Ok</span>(<span class="ident">Async</span>::<span class="ident">NotReady</span>) <span class="op">=&gt;</span> <span class="kw">continue</span>,
@@ -979,7 +937,7 @@
                     <span class="kw">loop</span> {
                         <span class="kw">match</span> <span class="ident">receive</span>.<span class="ident">poll</span>() {
                             <span class="prelude-val">Ok</span>(<span class="ident">Async</span>::<span class="ident">Ready</span>((<span class="prelude-val">None</span>, <span class="ident">client</span>))) <span class="op">=&gt;</span> {
-                                <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_connected</span>());
+                                <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_connected</span>());
                                 <span class="kw">break</span>;
                             }
                             <span class="prelude-val">Ok</span>(<span class="ident">Async</span>::<span class="ident">NotReady</span>) <span class="op">=&gt;</span> <span class="kw">continue</span>,
@@ -1007,8 +965,7 @@
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">receive</span> <span class="op">=</span> <span class="ident">client</span>.<span class="ident">receive</span>();
         <span class="kw">match</span> <span class="ident">receive</span>.<span class="ident">poll</span>() {
             <span class="prelude-val">Err</span>(<span class="ident">client</span>) <span class="op">=&gt;</span> {
-                <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_disconnected</span>(),
-                           <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">Disconnect</span>::<span class="ident">Stream</span>(<span class="number">17</span>)));
+                <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_disconnected</span>(), <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">Disconnect</span>::<span class="ident">Stream</span>(<span class="number">17</span>)));
             }
             _ <span class="op">=&gt;</span> <span class="macro">unreachable</span><span class="macro">!</span>(),
         };
@@ -1026,8 +983,7 @@
                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">receive</span> <span class="op">=</span> <span class="ident">client</span>.<span class="ident">receive</span>().<span class="ident">with_hard_timeout</span>(<span class="ident">duration</span>, <span class="kw-2">&amp;</span><span class="ident">timer</span>);
                 <span class="kw">match</span> <span class="ident">receive</span>.<span class="ident">poll</span>() {
                     <span class="prelude-val">Err</span>(<span class="ident">client</span>) <span class="op">=&gt;</span> {
-                        <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_disconnected</span>(),
-                                   <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">Disconnect</span>::<span class="ident">Stream</span>(<span class="number">17</span>)));
+                        <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_disconnected</span>(), <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">Disconnect</span>::<span class="ident">Stream</span>(<span class="number">17</span>)));
                     }
                     _ <span class="op">=&gt;</span> <span class="macro">unreachable</span><span class="macro">!</span>(),
                 };
@@ -1049,8 +1005,7 @@
                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">receive</span> <span class="op">=</span> <span class="ident">client</span>.<span class="ident">receive</span>().<span class="ident">with_soft_timeout</span>(<span class="ident">duration</span>, <span class="kw-2">&amp;</span><span class="ident">timer</span>);
                 <span class="kw">match</span> <span class="ident">receive</span>.<span class="ident">poll</span>() {
                     <span class="prelude-val">Err</span>(<span class="ident">client</span>) <span class="op">=&gt;</span> {
-                        <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_disconnected</span>(),
-                                   <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">Disconnect</span>::<span class="ident">Stream</span>(<span class="number">17</span>)));
+                        <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_disconnected</span>(), <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">Disconnect</span>::<span class="ident">Stream</span>(<span class="number">17</span>)));
                     }
                     _ <span class="op">=&gt;</span> <span class="macro">unreachable</span><span class="macro">!</span>(),
                 };
@@ -1089,8 +1044,8 @@
             <span class="comment">// Check that ReceiveWithHardTimeout is well behaved for timing out.</span>
             <span class="kw">let</span> <span class="ident">timeouted_client</span> <span class="op">=</span> <span class="ident">subtest_timeout_happens</span>(<span class="kw-2">&amp;</span><span class="ident">f</span>, <span class="ident">duration</span>);
             <span class="comment">// Ensure a timeout results in connection closure.</span>
-            <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">timeouted_client</span>.<span class="ident">status</span>().<span class="ident">is_connected</span>(), <span class="bool-val">false</span>);
-            <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">timeouted_client</span>.<span class="ident">status</span>().<span class="ident">is_disconnected</span>(),
+            <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">timeouted_client</span>.<span class="ident">is_connected</span>(), <span class="bool-val">false</span>);
+            <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">timeouted_client</span>.<span class="ident">is_disconnected</span>(),
                        <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">Disconnect</span>::<span class="ident">Timeout</span>));
 
             <span class="ident">millis</span> <span class="op">+=</span> <span class="number">50</span>;
@@ -1116,8 +1071,8 @@
             <span class="comment">// Check that ReceiveWithSoftTimeout is well behaved for timing out.</span>
             <span class="kw">let</span> <span class="ident">timeouted_client</span> <span class="op">=</span> <span class="ident">subtest_timeout_happens</span>(<span class="kw-2">&amp;</span><span class="ident">f</span>, <span class="ident">duration</span>);
             <span class="comment">// Ensure a timeout does not result in connection closure.</span>
-            <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">timeouted_client</span>.<span class="ident">status</span>().<span class="ident">is_connected</span>());
-            <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">timeouted_client</span>.<span class="ident">status</span>().<span class="ident">is_disconnected</span>(), <span class="prelude-val">None</span>);
+            <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">timeouted_client</span>.<span class="ident">is_connected</span>());
+            <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">timeouted_client</span>.<span class="ident">is_disconnected</span>(), <span class="prelude-val">None</span>);
 
             <span class="ident">millis</span> <span class="op">+=</span> <span class="number">50</span>;
         }
@@ -1156,8 +1111,7 @@
                 <span class="comment">// client sink.</span>
                 <span class="ident">drop</span>(<span class="ident">tx</span>);
                 <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">client</span>) <span class="op">=</span> <span class="ident">fut</span>.<span class="ident">poll</span>() {
-                    <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_disconnected</span>(),
-                               <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">Disconnect</span>::<span class="ident">Dropped</span>));
+                    <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_disconnected</span>(), <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">Disconnect</span>::<span class="ident">Dropped</span>));
                 } <span class="kw">else</span> {
                     <span class="macro">unreachable</span><span class="macro">!</span>();
                 }

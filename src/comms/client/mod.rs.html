@@ -548,47 +548,25 @@
 <span id="503">503</span>
 <span id="504">504</span>
 <span id="505">505</span>
-<span id="506">506</span>
-<span id="507">507</span>
-<span id="508">508</span>
-<span id="509">509</span>
-<span id="510">510</span>
-<span id="511">511</span>
-<span id="512">512</span>
-<span id="513">513</span>
-<span id="514">514</span>
-<span id="515">515</span>
-<span id="516">516</span>
-<span id="517">517</span>
-<span id="518">518</span>
-<span id="519">519</span>
-<span id="520">520</span>
-<span id="521">521</span>
-<span id="522">522</span>
-<span id="523">523</span>
-<span id="524">524</span>
-<span id="525">525</span>
-<span id="526">526</span>
-<span id="527">527</span>
-<span id="528">528</span>
-<span id="529">529</span>
-<span id="530">530</span>
-<span id="531">531</span>
-<span id="532">532</span>
-<span id="533">533</span>
-<span id="534">534</span>
 </pre><pre class="rust ">
 <span class="kw">mod</span> <span class="ident">receive</span>;
+<span class="kw">mod</span> <span class="ident">transmit</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">receive</span>::<span class="kw-2">*</span>;
+<span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">transmit</span>::<span class="kw-2">*</span>;
 
-<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">hash</span>::<span class="ident">Hash</span>;
 <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">fmt</span>::{<span class="self">self</span>, <span class="ident">Debug</span>};
 <span class="kw">use</span> <span class="ident">futures</span>::{<span class="ident">Future</span>, <span class="ident">Sink</span>, <span class="ident">Stream</span>, <span class="ident">Poll</span>, <span class="ident">Async</span>, <span class="ident">AsyncSink</span>, <span class="ident">StartSend</span>};
 <span class="kw">use</span> <span class="ident">futures</span>::<span class="ident">sync</span>::<span class="ident">mpsc</span>;
-<span class="kw">use</span> <span class="ident">futures</span>::<span class="ident">stream</span>::{<span class="ident">FromErr</span>, <span class="ident">SplitStream</span>, <span class="ident">SplitSink</span>};
-<span class="kw">use</span> <span class="ident">futures</span>::<span class="ident">sink</span>::<span class="ident">SinkFromErr</span>;
 <span class="kw">use</span> <span class="ident">tokio_timer</span>;
+<span class="comment">// Without this, importing in the test below becomes nasty.</span>
+<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">unused_imports</span>)]</span>
 <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
+
+<span class="doccomment">/// A client using mpsc channels.</span>
+<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">MpscClient</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">M</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">Unsplit</span><span class="op">&lt;</span><span class="ident">mpsc</span>::<span class="ident">Sender</span><span class="op">&lt;</span><span class="ident">M</span><span class="op">&gt;</span>, <span class="ident">mpsc</span>::<span class="ident">Receiver</span><span class="op">&lt;</span><span class="ident">M</span><span class="op">&gt;&gt;</span><span class="op">&gt;</span>;
+<span class="comment">// @TODO: Adopting tokio-io feature flag could allow these handy types. Unsure if worthwhile.</span>
+<span class="comment">//pub type TokioClient&lt;S, C&gt; = Client&lt;I, Framed&lt;S, C&gt;&gt;;</span>
+<span class="comment">//pub type TokioTcpClient&lt;C&gt; = Client&lt;I, Framed&lt;TcpStream, C&gt;&gt;;</span>
 
 <span class="doccomment">/// Handles communication with a single server client.</span>
 <span class="doccomment">///</span>
@@ -599,12 +577,10 @@
 <span class="doccomment">/// In addition this supports timeouts on receiving data. The `Timeout` enum</span>
 <span class="doccomment">/// allows specifying whether to have a timeout and whether the client should</span>
 <span class="doccomment">/// be disconnected should the timeout not be met.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="ident">id</span>: <span class="ident">I</span>,
     <span class="ident">inner</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">C</span>, <span class="ident">Disconnect</span><span class="op">&lt;</span><span class="ident">C</span>::<span class="ident">SinkError</span>, <span class="ident">C</span>::<span class="ident">Error</span><span class="op">&gt;&gt;</span>,
@@ -613,9 +589,7 @@
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">T</span>, <span class="ident">R</span><span class="op">&gt;</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">Unsplit</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">R</span><span class="op">&gt;&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
           <span class="ident">T</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">R</span>: <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">T</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">R</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">R</span>: <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="doccomment">/// Create a new client from separate `Sink` and `Stream`.</span>
     <span class="doccomment">///</span>
@@ -625,41 +599,9 @@
     }
 }
 
-<span class="comment">// @TODO: Implement `Sink` on `futures::stream::FromErr` to simplify these types.</span>
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>,
-                  <span class="ident">Unsplit</span><span class="op">&lt;</span><span class="ident">SinkFromErr</span><span class="op">&lt;</span><span class="ident">SplitSink</span><span class="op">&lt;</span><span class="ident">C</span><span class="op">&gt;</span>, <span class="ident">ErrorString</span><span class="op">&gt;</span>,
-                          <span class="ident">FromErr</span><span class="op">&lt;</span><span class="ident">SplitStream</span><span class="op">&lt;</span><span class="ident">C</span><span class="op">&gt;</span>, <span class="ident">ErrorString</span><span class="op">&gt;&gt;</span><span class="op">&gt;</span>
-    <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span><span class="op">&lt;</span><span class="ident">SinkError</span> <span class="op">=</span> <span class="ident">io</span>::<span class="ident">Error</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Stream</span><span class="op">&lt;</span><span class="ident">Error</span> <span class="op">=</span> <span class="ident">io</span>::<span class="ident">Error</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
-{
-    <span class="doccomment">/// Create a new client from a `Sink + Stream` that uses `io::Error`.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// ```rust,ignore</span>
-    <span class="doccomment">/// listener.incoming()</span>
-    <span class="doccomment">///     .for_each(move |(socket, addr)| {</span>
-    <span class="doccomment">///         let client = Client::new_from_io(Uuid::new_v4(), ClientTimeout::None, socket.framed(MsgCodec));</span>
-    <span class="doccomment">/// ```</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new_from_io</span>(<span class="ident">id</span>: <span class="ident">I</span>,
-                       <span class="ident">tx_rx</span>: <span class="ident">C</span>)
-                       <span class="op">-&gt;</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>,
-                                 <span class="ident">Unsplit</span><span class="op">&lt;</span><span class="ident">SinkFromErr</span><span class="op">&lt;</span><span class="ident">SplitSink</span><span class="op">&lt;</span><span class="ident">C</span><span class="op">&gt;</span>, <span class="ident">ErrorString</span><span class="op">&gt;</span>,
-                                         <span class="ident">FromErr</span><span class="op">&lt;</span><span class="ident">SplitStream</span><span class="op">&lt;</span><span class="ident">C</span><span class="op">&gt;</span>, <span class="ident">ErrorString</span><span class="op">&gt;&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> (<span class="ident">tx</span>, <span class="ident">rx</span>) <span class="op">=</span> <span class="ident">tx_rx</span>.<span class="ident">split</span>();
-        <span class="ident">Client</span>::<span class="ident">new_from_split</span>(<span class="ident">id</span>, <span class="ident">tx</span>.<span class="ident">sink_from_err</span>(), <span class="ident">rx</span>.<span class="ident">from_err</span>())
-    }
-}
-
-<span class="doccomment">/// A client using mpsc channels.</span>
-<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">MpscClient</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">M</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">Unsplit</span><span class="op">&lt;</span><span class="ident">mpsc</span>::<span class="ident">Sender</span><span class="op">&lt;</span><span class="ident">M</span><span class="op">&gt;</span>, <span class="ident">mpsc</span>::<span class="ident">Receiver</span><span class="op">&lt;</span><span class="ident">M</span><span class="op">&gt;&gt;</span><span class="op">&gt;</span>;
-<span class="comment">// @TODO: Adopting tokio-io feature flag could allow these handy types. Unsure if worthwhile.</span>
-<span class="comment">//pub type TokioClient&lt;S, C&gt; = Client&lt;I, Framed&lt;S, C&gt;&gt;;</span>
-<span class="comment">//pub type TokioTcpClient&lt;C&gt; = Client&lt;I, Framed&lt;TcpStream, C&gt;&gt;;</span>
-
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="doccomment">/// Create a new client from a `Sink + Stream`.</span>
     <span class="doccomment">///</span>
@@ -686,13 +628,6 @@
         }
     }
 
-    <span class="doccomment">/// Join a `Room` of clients with the same type.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">join</span>(<span class="self">self</span>, <span class="ident">room</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">Room</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>) <span class="op">-&gt;</span> <span class="ident">bool</span>
-        <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Eq</span> <span class="op">+</span> <span class="ident">Hash</span>
-    {
-        <span class="ident">room</span>.<span class="ident">insert</span>(<span class="self">self</span>)
-    }
-
     <span class="doccomment">/// Future that transmits a single message.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// If this succeeds the Item is a Client. If the transmission fails the Error is a</span>
@@ -708,15 +643,8 @@
     <span class="doccomment">///     .map(|client| println!(&quot;sent hello to {}.&quot;, client.id()); ())</span>
     <span class="doccomment">///     .map_err(|client| println!(&quot;sending hello to {} failed.&quot;, client.id()); ()));</span>
     <span class="doccomment">/// ```</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">transmit</span>(<span class="self">self</span>, <span class="ident">msg</span>: <span class="ident">C</span>::<span class="ident">SinkItem</span>) <span class="op">-&gt;</span> <span class="ident">Box</span><span class="op">&lt;</span><span class="ident">Future</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="self">Self</span>, <span class="ident">Error</span> <span class="op">=</span> <span class="self">Self</span><span class="op">&gt;&gt;</span> {
-        <span class="comment">// N.B. This does ensure the inner is set, but it&#39;s a bit of a hack.</span>
-        <span class="kw">let</span> <span class="ident">id</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">id</span>();
-        <span class="ident">Box</span>::<span class="ident">new</span>(<span class="self">self</span>.<span class="ident">send</span>(<span class="ident">msg</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> {
-            <span class="ident">Client</span> {
-                <span class="ident">id</span>: <span class="ident">id</span>,
-                <span class="ident">inner</span>: <span class="prelude-val">Err</span>(<span class="ident">e</span>.<span class="ident">clone</span>()),
-            }
-        }))
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">transmit</span>(<span class="self">self</span>, <span class="ident">msg</span>: <span class="ident">C</span>::<span class="ident">SinkItem</span>) <span class="op">-&gt;</span> <span class="ident">Transmit</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> {
+        <span class="ident">Transmit</span>::<span class="ident">new</span>(<span class="self">self</span>, <span class="ident">msg</span>)
     }
 
     <span class="doccomment">/// Future that tries to receive a single message.</span>
@@ -724,17 +652,17 @@
         <span class="ident">Receive</span>::<span class="ident">new</span>(<span class="self">self</span>)
     }
 
-    <span class="doccomment">/// Get the current status of this Client.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// Check whether a Client is connected with `client.status().is_connected()`.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// If disconnected you can get the cause of disconnection with</span>
-    <span class="doccomment">/// `client.status().is_disconnected().unwrap()`.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">status</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-&gt;</span> <span class="ident">Status</span><span class="op">&lt;</span><span class="ident">C</span>::<span class="ident">SinkError</span>, <span class="ident">C</span>::<span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="doccomment">/// Is the client connected?</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_connected</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-&gt;</span> <span class="ident">bool</span> {
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">is_ok</span>()
+    }
+
+    <span class="doccomment">/// Get disconnection cause if the client is disconnected.</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_disconnected</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Disconnect</span><span class="op">&lt;</span><span class="ident">C</span>::<span class="ident">SinkError</span>, <span class="ident">C</span>::<span class="ident">Error</span><span class="op">&gt;&gt;</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="kw-2">ref</span> <span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">inner</span> {
-            <span class="ident">Status</span>::<span class="ident">Disconnected</span>(<span class="ident">e</span>.<span class="ident">clone</span>())
+            <span class="prelude-val">Some</span>(<span class="ident">e</span>)
         } <span class="kw">else</span> {
-            <span class="ident">Status</span>::<span class="ident">Connected</span>
+            <span class="prelude-val">None</span>
         }
     }
 
@@ -765,16 +693,23 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_inner</span>(<span class="self">self</span>) <span class="op">-&gt;</span> (<span class="ident">I</span>, <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">C</span>, <span class="ident">Disconnect</span><span class="op">&lt;</span><span class="ident">C</span>::<span class="ident">SinkError</span>, <span class="ident">C</span>::<span class="ident">Error</span><span class="op">&gt;&gt;</span>) {
         (<span class="self">self</span>.<span class="ident">id</span>, <span class="self">self</span>.<span class="ident">inner</span>)
     }
+
+    <span class="attribute">#[<span class="ident">doc</span>(<span class="ident">hidden</span>)]</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_disconnect</span>(<span class="self">self</span>) <span class="op">-&gt;</span> (<span class="ident">I</span>, <span class="ident">Disconnect</span><span class="op">&lt;</span><span class="ident">C</span>::<span class="ident">SinkError</span>, <span class="ident">C</span>::<span class="ident">Error</span><span class="op">&gt;</span>) {
+        <span class="kw">let</span> <span class="ident">disconnect</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">inner</span> {
+            <span class="prelude-val">Ok</span>(_) <span class="op">=&gt;</span> <span class="macro">unimplemented</span><span class="macro">!</span>(),
+            <span class="prelude-val">Err</span>(<span class="ident">disconnect</span>) <span class="op">=&gt;</span> <span class="ident">disconnect</span>,
+        };
+        (<span class="self">self</span>.<span class="ident">id</span>, <span class="ident">disconnect</span>)
+    }
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">Stream</span> <span class="kw">for</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span>::<span class="ident">Item</span>;
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">Disconnect</span><span class="op">&lt;</span><span class="ident">C</span>::<span class="ident">SinkError</span>, <span class="ident">C</span>::<span class="ident">Error</span><span class="op">&gt;</span>;
+    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> ();
 
     <span class="kw">fn</span> <span class="ident">poll</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) <span class="op">-&gt;</span> <span class="ident">Poll</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="self">Self</span>::<span class="ident">Item</span><span class="op">&gt;</span>, <span class="self">Self</span>::<span class="ident">Error</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">inner_poll</span> <span class="op">=</span> {
@@ -799,8 +734,8 @@
             <span class="comment">// If the stream yields an error we discard it. This is a limitation vs the</span>
             <span class="comment">// current stream error model but it simplifies an already complex model.</span>
             <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=&gt;</span> {
-                <span class="self">self</span>.<span class="ident">inner</span> <span class="op">=</span> <span class="prelude-val">Err</span>(<span class="ident">Disconnect</span>::<span class="ident">Stream</span>(<span class="ident">e</span>.<span class="ident">clone</span>()));
-                <span class="prelude-val">Err</span>(<span class="ident">Disconnect</span>::<span class="ident">Stream</span>(<span class="ident">e</span>))
+                <span class="self">self</span>.<span class="ident">inner</span> <span class="op">=</span> <span class="prelude-val">Err</span>(<span class="ident">Disconnect</span>::<span class="ident">Stream</span>(<span class="ident">e</span>));
+                <span class="prelude-val">Ok</span>(<span class="ident">Async</span>::<span class="ident">Ready</span>(<span class="prelude-val">None</span>))
             }
         }
     }
@@ -808,17 +743,15 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">Sink</span> <span class="kw">for</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="kw">type</span> <span class="ident">SinkItem</span> <span class="op">=</span> <span class="ident">C</span>::<span class="ident">SinkItem</span>;
-    <span class="kw">type</span> <span class="ident">SinkError</span> <span class="op">=</span> <span class="ident">Disconnect</span><span class="op">&lt;</span><span class="ident">C</span>::<span class="ident">SinkError</span>, <span class="ident">C</span>::<span class="ident">Error</span><span class="op">&gt;</span>;
+    <span class="kw">type</span> <span class="ident">SinkError</span> <span class="op">=</span> ();
 
     <span class="kw">fn</span> <span class="ident">start_send</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">item</span>: <span class="self">Self</span>::<span class="ident">SinkItem</span>) <span class="op">-&gt;</span> <span class="ident">StartSend</span><span class="op">&lt;</span><span class="self">Self</span>::<span class="ident">SinkItem</span>, <span class="self">Self</span>::<span class="ident">SinkError</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">inner_start_send</span> <span class="op">=</span> {
             <span class="kw">let</span> <span class="ident">inner</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">as_mut</span>() {
-                <span class="prelude-val">Err</span>(_) <span class="op">=&gt;</span> <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Disconnect</span>::<span class="ident">Closed</span>),
+                <span class="prelude-val">Err</span>(_) <span class="op">=&gt;</span> <span class="kw">return</span> <span class="prelude-val">Err</span>(()),
                 <span class="prelude-val">Ok</span>(<span class="ident">inner</span>) <span class="op">=&gt;</span> <span class="ident">inner</span>,
             };
 
@@ -829,8 +762,8 @@
             <span class="prelude-val">Ok</span>(<span class="ident">AsyncSink</span>::<span class="ident">Ready</span>) <span class="op">=&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">AsyncSink</span>::<span class="ident">Ready</span>),
             <span class="prelude-val">Ok</span>(<span class="ident">AsyncSink</span>::<span class="ident">NotReady</span>(<span class="ident">item</span>)) <span class="op">=&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">AsyncSink</span>::<span class="ident">NotReady</span>(<span class="ident">item</span>)),
             <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=&gt;</span> {
-                <span class="self">self</span>.<span class="ident">inner</span> <span class="op">=</span> <span class="prelude-val">Err</span>(<span class="ident">Disconnect</span>::<span class="ident">Sink</span>(<span class="ident">e</span>.<span class="ident">clone</span>()));
-                <span class="prelude-val">Err</span>(<span class="ident">Disconnect</span>::<span class="ident">Sink</span>(<span class="ident">e</span>))
+                <span class="self">self</span>.<span class="ident">inner</span> <span class="op">=</span> <span class="prelude-val">Err</span>(<span class="ident">Disconnect</span>::<span class="ident">Sink</span>(<span class="ident">e</span>));
+                <span class="prelude-val">Err</span>(())
             }
         }
     }
@@ -838,7 +771,7 @@
     <span class="kw">fn</span> <span class="ident">poll_complete</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) <span class="op">-&gt;</span> <span class="ident">Poll</span><span class="op">&lt;</span>(), <span class="self">Self</span>::<span class="ident">SinkError</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">inner_poll_complete</span> <span class="op">=</span> {
             <span class="kw">let</span> <span class="ident">inner</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">as_mut</span>() {
-                <span class="prelude-val">Err</span>(_) <span class="op">=&gt;</span> <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Disconnect</span>::<span class="ident">Closed</span>),
+                <span class="prelude-val">Err</span>(_) <span class="op">=&gt;</span> <span class="kw">return</span> <span class="prelude-val">Err</span>(()),
                 <span class="prelude-val">Ok</span>(<span class="ident">inner</span>) <span class="op">=&gt;</span> <span class="ident">inner</span>,
             };
 
@@ -849,8 +782,8 @@
             <span class="prelude-val">Ok</span>(<span class="ident">Async</span>::<span class="ident">Ready</span>(())) <span class="op">=&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Async</span>::<span class="ident">Ready</span>(())),
             <span class="prelude-val">Ok</span>(<span class="ident">Async</span>::<span class="ident">NotReady</span>) <span class="op">=&gt;</span> <span class="prelude-val">Ok</span>(<span class="ident">Async</span>::<span class="ident">NotReady</span>),
             <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=&gt;</span> {
-                <span class="self">self</span>.<span class="ident">inner</span> <span class="op">=</span> <span class="prelude-val">Err</span>(<span class="ident">Disconnect</span>::<span class="ident">Sink</span>(<span class="ident">e</span>.<span class="ident">clone</span>()));
-                <span class="prelude-val">Err</span>(<span class="ident">Disconnect</span>::<span class="ident">Sink</span>(<span class="ident">e</span>))
+                <span class="self">self</span>.<span class="ident">inner</span> <span class="op">=</span> <span class="prelude-val">Err</span>(<span class="ident">Disconnect</span>::<span class="ident">Sink</span>(<span class="ident">e</span>));
+                <span class="prelude-val">Err</span>(())
             }
         }
     }
@@ -858,9 +791,7 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">PartialEq</span> <span class="kw">for</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="ident">PartialEq</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>) <span class="op">-&gt;</span> <span class="ident">bool</span> {
         <span class="self">self</span>.<span class="ident">id</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">id</span>
@@ -869,10 +800,25 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">Eq</span> <span class="kw">for</span> <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">I</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Eq</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">C</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">C</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">C</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
+}
+
+<span class="doccomment">/// Possible causes for a disconnection.</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>)]</span>
+<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">Disconnect</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">R</span><span class="op">&gt;</span> {
+    <span class="doccomment">/// Closed with `Client::close` or similar.</span>
+    <span class="ident">Closed</span>,
+    <span class="doccomment">/// The `Sink` or `Stream` dropped.</span>
+    <span class="ident">Dropped</span>,
+    <span class="doccomment">/// Closed because of a timeout strategy.</span>
+    <span class="ident">Timeout</span>,
+    <span class="doccomment">/// Error in a `tokio_timer::Timer` being used for timeout.</span>
+    <span class="ident">Timer</span>(<span class="ident">tokio_timer</span>::<span class="ident">TimerError</span>),
+    <span class="doccomment">/// Error in the client&#39;s `Sink`.</span>
+    <span class="ident">Sink</span>(<span class="ident">T</span>),
+    <span class="doccomment">/// Error in the client&#39;s `Stream`.</span>
+    <span class="ident">Stream</span>(<span class="ident">R</span>),
 }
 
 <span class="comment">// @TODO: When breaking `Client` into separate futures, try defining:</span>
@@ -901,9 +847,7 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">R</span><span class="op">&gt;</span> <span class="ident">Sink</span> <span class="kw">for</span> <span class="ident">Unsplit</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">R</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">T</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">R</span>: <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">T</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">R</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">R</span>: <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="kw">type</span> <span class="ident">SinkItem</span> <span class="op">=</span> <span class="ident">T</span>::<span class="ident">SinkItem</span>;
     <span class="kw">type</span> <span class="ident">SinkError</span> <span class="op">=</span> <span class="ident">T</span>::<span class="ident">SinkError</span>;
@@ -919,9 +863,7 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">R</span><span class="op">&gt;</span> <span class="ident">Stream</span> <span class="kw">for</span> <span class="ident">Unsplit</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">R</span><span class="op">&gt;</span>
     <span class="kw">where</span> <span class="ident">T</span>: <span class="ident">Sink</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">R</span>: <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-          <span class="ident">T</span>::<span class="ident">SinkError</span>: <span class="ident">Clone</span>,
-          <span class="ident">R</span>::<span class="ident">Error</span>: <span class="ident">Clone</span>
+          <span class="ident">R</span>: <span class="ident">Stream</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
     <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="ident">R</span>::<span class="ident">Item</span>;
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">R</span>::<span class="ident">Error</span>;
@@ -949,18 +891,18 @@
         <span class="comment">// Adding of a `Client` to a `Room` returns `true`.</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">room</span> <span class="op">=</span> <span class="ident">Room</span>::<span class="ident">default</span>();
         <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">room</span>.<span class="ident">ids</span>().<span class="ident">len</span>(), <span class="number">0</span>);
-        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client0</span>.<span class="ident">join</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">room</span>));
+        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">room</span>.<span class="ident">insert</span>(<span class="ident">client0</span>));
         <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">room</span>.<span class="ident">ids</span>(),
                    <span class="macro">vec</span><span class="macro">!</span>[<span class="ident">client0_id</span>.<span class="ident">to_string</span>()].<span class="ident">into_iter</span>().<span class="ident">collect</span>());
 
         <span class="comment">// Adding a `Client` whose ID was already present returns `false` and doesn&#39;t</span>
         <span class="comment">// add a duplicate.</span>
-        <span class="macro">assert</span><span class="macro">!</span>(<span class="op">!</span><span class="ident">client0_duplicate_name</span>.<span class="ident">join</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">room</span>));
+        <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">room</span>.<span class="ident">insert</span>(<span class="ident">client0_duplicate_name</span>), <span class="bool-val">false</span>);
         <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">room</span>.<span class="ident">ids</span>(),
                    <span class="macro">vec</span><span class="macro">!</span>[<span class="ident">client0_id</span>.<span class="ident">to_string</span>()].<span class="ident">into_iter</span>().<span class="ident">collect</span>());
 
         <span class="comment">// Adding a different-IDed `Client` to a `Room` works.</span>
-        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client1</span>.<span class="ident">join</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">room</span>));
+        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">room</span>.<span class="ident">insert</span>(<span class="ident">client1</span>));
         <span class="comment">// Extended comparison necessary because ordering not preserved.</span>
         <span class="kw">let</span> <span class="ident">client_ids</span> <span class="op">=</span> <span class="ident">room</span>.<span class="ident">ids</span>();
         <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client_ids</span>.<span class="ident">len</span>() <span class="op">==</span> <span class="number">2</span>);
@@ -1081,34 +1023,34 @@
         <span class="kw">let</span> <span class="ident">msg</span> <span class="op">=</span> <span class="ident">TinyMsg</span>::<span class="ident">B</span>(<span class="string">&quot;ABC&quot;</span>.<span class="ident">to_string</span>());
 
         <span class="kw">let</span> (<span class="kw-2">mut</span> <span class="ident">rx_from_client</span>, _, <span class="ident">client</span>) <span class="op">=</span> <span class="ident">mock_client</span>(<span class="string">&quot;client1&quot;</span>, <span class="number">1</span>);
-        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_connected</span>());
+        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_connected</span>());
         <span class="comment">// Check unfortunate edgecase that a closed channel is not noticed until the next</span>
         <span class="comment">// IO action.</span>
         <span class="kw">let</span> _ <span class="op">=</span> <span class="ident">rx_from_client</span>.<span class="ident">close</span>();
-        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_connected</span>());
+        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_connected</span>());
 
         <span class="kw">let</span> (_, <span class="kw-2">mut</span> <span class="ident">tx_to_client</span>, <span class="ident">client</span>) <span class="op">=</span> <span class="ident">mock_client</span>(<span class="string">&quot;client2&quot;</span>, <span class="number">1</span>);
-        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_connected</span>());
+        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_connected</span>());
         <span class="kw">let</span> _ <span class="op">=</span> <span class="ident">tx_to_client</span>.<span class="ident">close</span>();
         <span class="comment">// Check unfortunate edgecase that a closed channel is not noticed until the next</span>
         <span class="comment">// IO action.</span>
-        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_connected</span>());
+        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_connected</span>());
 
         <span class="comment">// Assert that status with dropped channels indicates the client is gone.</span>
         <span class="kw">let</span> (_, _, <span class="ident">client</span>) <span class="op">=</span> <span class="ident">mock_client</span>(<span class="string">&quot;client2&quot;</span>, <span class="number">1</span>);
-        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_connected</span>());
+        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_connected</span>());
         <span class="kw">match</span> <span class="ident">client</span>.<span class="ident">transmit</span>(<span class="ident">msg</span>.<span class="ident">clone</span>()).<span class="ident">wait</span>() {
             <span class="prelude-val">Ok</span>(_) <span class="op">=&gt;</span> <span class="macro">unreachable</span><span class="macro">!</span>(),
-            <span class="prelude-val">Err</span>(<span class="ident">client</span>) <span class="op">=&gt;</span> <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_disconnected</span>().<span class="ident">is_some</span>()),
+            <span class="prelude-val">Err</span>(<span class="ident">client</span>) <span class="op">=&gt;</span> <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_disconnected</span>().<span class="ident">is_some</span>()),
         };
     }
 
     <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">can_close</span>() {
         <span class="kw">let</span> (_, _, <span class="kw-2">mut</span> <span class="ident">client</span>) <span class="op">=</span> <span class="ident">mock_client</span>(<span class="string">&quot;client1&quot;</span>, <span class="number">1</span>);
-        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_connected</span>());
+        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_connected</span>());
         <span class="ident">client</span>.<span class="ident">close</span>();
-        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">status</span>().<span class="ident">is_disconnected</span>().<span class="ident">is_some</span>());
+        <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">client</span>.<span class="ident">is_disconnected</span>().<span class="ident">is_some</span>());
         <span class="comment">// @TODO: Check channels are gone.</span>
     }
 }

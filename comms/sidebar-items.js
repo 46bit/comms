@@ -1,1 +1,1 @@
-initSidebarItems({"enum":[["Disconnect","Possible causes for a disconnection."],["Status","Whether a client is connected or disconnected."]],"mod":[["client","A single client connection."],["room","Rooms (groups) of client connections."]],"struct":[["ErrorString","Convert `io::Error` to a `Clone` representation."]]});
+initSidebarItems({"mod":[["client","A single client connection."],["room","Rooms (groups) of client connections."]]});

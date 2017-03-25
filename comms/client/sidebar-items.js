@@ -1,1 +1,1 @@
-initSidebarItems({"struct":[["Client","Handles communication with a single server client."],["Receive",""],["ReceiveWithHardTimeout",""],["ReceiveWithSoftTimeout",""],["Unsplit",""]],"type":[["MpscClient","A client using mpsc channels."]]});
+initSidebarItems({"enum":[["Disconnect","Possible causes for a disconnection."]],"struct":[["Client","Handles communication with a single server client."],["Receive",""],["ReceiveWithHardTimeout",""],["ReceiveWithSoftTimeout",""],["Transmit",""],["Unsplit",""]],"type":[["MpscClient","A client using mpsc channels."]]});
