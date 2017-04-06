@@ -1,16 +1,12 @@
 [package]
 name = "comms"
-version = "0.1.2"
+version = "0.1.4"
 authors = ["Michael Mokrysz <hi@46b.it>"]
 
 [dependencies]
 futures = "0.1"
 tokio-timer = "0.1"
 clippy = {version = "*", optional = true}
-
-[replace]
-"futures:0.1.12" = { git = "https://github.com/sirpent-team/futures-rs", branch = "master" }
-"tokio-timer:0.1.0" = { git = "https://github.com/sirpent-team/tokio-timer", branch = "master" }
 
 [dev-dependencies]
 quickcheck = "0.2"
